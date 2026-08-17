@@ -454,21 +454,24 @@ export class TunnelManager {
       await errHandle.close()
       throw error
     }
-    if (child.pid === undefined) {
-      await outHandle.close()
-      await errHandle.close()
-      throw new TunnelError(`[${t.key}] failed to spawn ${cmd[0]}`)
-    }
     const cleanup = (): void => {
       this.children.delete(child.pid!)
       void outHandle.close().catch(() => undefined)
       void errHandle.close().catch(() => undefined)
     }
+    // Attach listeners BEFORE checking the pid: when spawn fails (e.g. ENOENT),
+    // Node emits 'error' asynchronously. If the listener is attached only after
+    // throwing below, that event is unhandled and crashes the main process.
     child.on('exit', cleanup)
     child.on('error', (error) => {
       spawnState.error = error
       cleanup()
     })
+    if (child.pid === undefined) {
+      await outHandle.close()
+      await errHandle.close()
+      throw new TunnelError(`[${t.key}] failed to spawn ${cmd[0]}`)
+    }
     this.children.set(child.pid, child)
 
     const data: StateData = {

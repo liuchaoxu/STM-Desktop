@@ -53,6 +53,15 @@ const TUNNEL_FORM_KEYS = new Set([
 const groupNames = computed(() => cfg.value.groups.map((g) => g.name))
 const revealedPwd = ref<Set<number>>(new Set())
 
+/**
+ * Deep-copy to a plain JSON object. Vue reactive proxies cannot cross the
+ * Electron IPC structured-clone boundary ("An object could not be cloned."),
+ * so any object sent to the main process must be plain data first.
+ */
+function toPlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -84,7 +93,7 @@ async function save(): Promise<void> {
   saving.value = true
   error.value = ''
   try {
-    const saved = await window.api.config.save(cfg.value)
+    const saved = await window.api.config.save(toPlain(cfg.value))
     snapshot.value = JSON.stringify(saved)
     toast.success('配置已保存')
   } catch (saveError) {

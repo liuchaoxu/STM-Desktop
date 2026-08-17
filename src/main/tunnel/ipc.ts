@@ -49,7 +49,10 @@ export function createManager(): TunnelManager {
   const appRoot = app.getAppPath()
   return new TunnelManager({
     configPath: path.join(userData, 'tunnel.conf'),
-    rootDir: appRoot,
+    // In packaged builds app.getAppPath() is the app.asar FILE, which cannot be
+    // used as a working directory (spawn would fail with ENOENT) or as a base
+    // for relative paths. Use the real directory containing the asar instead.
+    rootDir: app.isPackaged ? path.dirname(appRoot) : appRoot,
     runtimeDir,
     plinkCandidates: plinkCandidates()
   })
