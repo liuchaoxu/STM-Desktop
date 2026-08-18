@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import ToastHost from './components/ToastHost.vue'
+import AuthorLinks from './components/AuthorLinks.vue'
 import TunnelsView from './views/TunnelsView.vue'
 import ConfigView from './views/ConfigView.vue'
 import LogsView from './views/LogsView.vue'
@@ -69,6 +70,7 @@ onMounted(() => {
         </span>
         <span v-if="busy" class="busy-chip">⏳ {{ busyLabel }}</span>
       </div>
+      <AuthorLinks />
     </header>
 
     <main class="app-main">
