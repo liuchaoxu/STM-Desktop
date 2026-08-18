@@ -1,7 +1,7 @@
 {
   "name": "stm-desktop",
   "productName": "STM Desktop",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "STM Desktop - 可视化的 SSH 隧道管理器（SSH Tunnel Manager）桌面版",
   "main": "./out/main/index.js",
   "author": "liuchaoxu",
