@@ -4,7 +4,7 @@
   "version": "1.0.1",
   "description": "STM Desktop - 可视化的 SSH 隧道管理器（SSH Tunnel Manager）桌面版",
   "main": "./out/main/index.js",
-  "author": "example.com",
+  "author": "liuchaoxu",
   "homepage": "https://electron-vite.org",
   "scripts": {
     "format": "prettier --write .",
