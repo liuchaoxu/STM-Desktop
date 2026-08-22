@@ -1,5 +1,7 @@
 # STM Desktop（SSH 隧道管理器）
 
+<img src="./resources/icon.png" alt="STM" width="168" height="168">
+
 基于 **Electron + Vue 3 + TypeScript** 的可视化 SSH 隧道管理工具，将工作区中 [SSH-Tunnel-Manager](../SSH-Tunnel-Manager/README.md)（Python 命令行版）的全部功能移植为桌面 GUI，并把配置管理也做成了页面操作：新增、修改、删除隧道/组、导入导出配置、实时启停与日志查看，无需再手改配置文件。
 
 > STM = SSH Tunnel Manager。项目与打包名称：`STM Desktop`（npm 包名 `stm-desktop`，可执行文件 `STMDesktop.exe`）。
