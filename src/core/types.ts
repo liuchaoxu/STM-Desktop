@@ -1,5 +1,12 @@
 /**
- * Shared model for the SSH tunnel manager (main process side).
+ * Domain model for the SSH tunnel manager — platform agnostic.
+ *
+ * Everything in `src/core/` must run on Node, in a browser/webview, or on a
+ * mobile runtime. It may not import `fs`, `path`, `os`, `net`,
+ * `child_process` or `electron`; those live behind the interfaces in
+ * `storage.ts` and `transport.ts` and are provided per platform by
+ * `src/platforms/*`. The boundary is enforced by ESLint.
+ *
  * Mirrors the config model of the original SSH-Tunnel-Manager project:
  *   defaults -> group -> tunnel  (later layers override earlier ones)
  */
@@ -80,9 +87,15 @@ export interface LogPayload {
   running: boolean
 }
 
+/** Machine-readable error codes, so callers never have to match on message text. */
+export type TunnelErrorCode = 'CONFIG_NOT_FOUND'
+
 export class TunnelError extends Error {
-  constructor(message: string) {
+  readonly code?: TunnelErrorCode
+
+  constructor(message: string, code?: TunnelErrorCode) {
     super(message)
     this.name = 'TunnelError'
+    this.code = code
   }
 }

@@ -1,0 +1,10 @@
+# Keep line endings consistent for every checkout. Without this, a Windows
+# clone (core.autocrlf=true) writes CRLF while Prettier/EditorConfig expect LF,
+# so `npm run lint` reports a CRLF warning on nearly every line of every file.
+* text=auto eol=lf
+
+# Binary assets must never be converted.
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary

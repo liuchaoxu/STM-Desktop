@@ -1,15 +1,21 @@
 /**
- * IPC surface for the tunnel manager.
+ * Electron IPC surface for the tunnel manager.
+ *
  * All handlers are async `ipcMain.handle` channels; errors are thrown and
  * propagate to the renderer as rejected promises with a readable message.
+ * This file is the desktop-specific wiring only: it builds the Node platform
+ * (file-backed config + external ssh/plink transport) and exposes the shared
+ * `TunnelManager` over IPC.
  */
 import { app, dialog, ipcMain, shell } from 'electron'
 import { promises as fs } from 'fs'
 import { existsSync } from 'fs'
 import * as path from 'path'
-import type { ConfigData } from './types'
-import { TunnelManager } from './manager'
-import { defaultConfig, serializeConfig } from './config'
+import type { TunnelManager } from '../core/manager'
+import { defaultConfig } from '../core/config'
+import { createTunnelManager, FileConfigStore } from '../platforms/node'
+import { assertConfigPayload, assertTarget } from './ipc-guard'
+import { ElectronSecretStore } from './secret-store'
 
 interface Settings {
   configPath?: string
@@ -32,38 +38,70 @@ async function saveSettings(settings: Settings): Promise<void> {
   await fs.writeFile(settingsFile(), JSON.stringify(settings, null, 2), 'utf-8')
 }
 
-function plinkCandidates(): string[] {
-  const userData = app.getPath('userData')
-  const appRoot = app.getAppPath()
+/**
+ * plink copies that ship with the app, so their version is known to support
+ * `-pwfile` (PuTTY 0.77+).
+ */
+function shippedPlinkPaths(): string[] {
   return [
     path.join(process.resourcesPath, 'plink.exe'), // packaged: extraResources
     path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'plink.exe'), // packaged: asarUnpack
-    path.join(appRoot, 'resources', 'plink.exe'), // dev
-    path.join(userData, 'plink.exe') // user-provided override
+    path.join(app.getAppPath(), 'resources', 'plink.exe') // dev
   ]
+}
+
+/** Every place a plink may be found; user-supplied copies may be older. */
+function plinkCandidates(): string[] {
+  return [...shippedPlinkPaths(), path.join(app.getPath('userData'), 'plink.exe')]
+}
+
+/**
+ * Config files the renderer may switch to. The only sanctioned ways in are
+ * `config:open` (a native dialog the user drives) and the path we persisted in
+ * `settings.json` ourselves. Without this, a compromised renderer could point
+ * the app at any readable file and read it back through parse error messages.
+ */
+const authorizedConfigPaths = new Set<string>()
+
+function authorizeConfigPath(candidate: string): string {
+  const resolved = path.resolve(candidate)
+  authorizedConfigPaths.add(resolved)
+  return resolved
+}
+
+function clampLines(value: unknown): number {
+  const lines = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 200
+  return Math.max(10, Math.min(2000, lines))
 }
 
 export function createManager(): TunnelManager {
   const userData = app.getPath('userData')
-  const runtimeDir = path.join(userData, '.tunnel')
   const appRoot = app.getAppPath()
-  return new TunnelManager({
+  return createTunnelManager({
     configPath: path.join(userData, 'tunnel.conf'),
     // In packaged builds app.getAppPath() is the app.asar FILE, which cannot be
     // used as a working directory (spawn would fail with ENOENT) or as a base
     // for relative paths. Use the real directory containing the asar instead.
     rootDir: app.isPackaged ? path.dirname(appRoot) : appRoot,
-    runtimeDir,
-    plinkCandidates: plinkCandidates()
+    runtimeDir: path.join(userData, '.tunnel'),
+    plinkCandidates: plinkCandidates(),
+    shippedPlinkPaths: shippedPlinkPaths(),
+    // Passwords are kept out of tunnel.conf whenever the OS can protect them.
+    secretStore: new ElectronSecretStore(path.join(userData, 'secrets.json'))
   })
 }
 
 export async function registerIpc(manager: TunnelManager): Promise<void> {
+  // The default config location is always switchable.
+  authorizeConfigPath(manager.getConfigPath())
+
   // Apply the persisted config path (if any) before serving requests.
   const settings = await loadSettings()
   if (settings.configPath) {
+    // We wrote this path ourselves, so it is authorised by construction.
+    const persisted = authorizeConfigPath(settings.configPath)
     try {
-      await manager.setConfigPath(settings.configPath)
+      await manager.useStore(new FileConfigStore(persisted))
     } catch {
       /* keep default path on failure */
     }
@@ -72,22 +110,35 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
   }
 
   ipcMain.handle('tunnel:list', () => manager.list())
-  ipcMain.handle('tunnel:start', (_event, target: string) => manager.run('start', target))
-  ipcMain.handle('tunnel:stop', (_event, target: string) => manager.run('stop', target))
-  ipcMain.handle('tunnel:restart', (_event, target: string) => manager.run('restart', target))
-  ipcMain.handle('tunnel:validate', (_event, target: string) => manager.validate(target))
-  ipcMain.handle('tunnel:logs', (_event, target: string, lines?: number) =>
-    manager.logs(target, Math.max(10, Math.min(2000, lines ?? 200)))
+  ipcMain.handle('tunnel:start', (_event, target: unknown) =>
+    manager.run('start', assertTarget(target))
+  )
+  ipcMain.handle('tunnel:stop', (_event, target: unknown) =>
+    manager.run('stop', assertTarget(target))
+  )
+  ipcMain.handle('tunnel:restart', (_event, target: unknown) =>
+    manager.run('restart', assertTarget(target))
+  )
+  ipcMain.handle('tunnel:validate', (_event, target: unknown) =>
+    manager.validate(assertTarget(target))
+  )
+  ipcMain.handle('tunnel:logs', (_event, target: unknown, lines?: unknown) =>
+    manager.logs(assertTarget(target), clampLines(lines))
   )
 
   ipcMain.handle('config:get', () => manager.getConfig())
-  ipcMain.handle('config:save', (_event, cfg: ConfigData) => manager.saveConfig(cfg))
+  ipcMain.handle('config:save', (_event, cfg: unknown) =>
+    manager.saveConfig(assertConfigPayload(cfg))
+  )
   ipcMain.handle('config:reload', () => manager.reload())
   ipcMain.handle('config:path:get', () => ({ path: manager.getConfigPath() }))
-  ipcMain.handle('config:path:set', async (_event, nextPath: string) => {
+  ipcMain.handle('config:path:set', async (_event, nextPath: unknown) => {
     if (typeof nextPath !== 'string' || !nextPath.trim()) throw new Error('invalid config path')
     const resolved = path.resolve(nextPath.trim())
-    await manager.setConfigPath(resolved)
+    if (!authorizedConfigPaths.has(resolved)) {
+      throw new Error('config path is not authorized')
+    }
+    await manager.useStore(new FileConfigStore(resolved))
     await saveSettings({ configPath: resolved })
     return manager.getConfig()
   })
@@ -101,20 +152,20 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
       ]
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    const chosen = result.filePaths[0]!
-    await manager.setConfigPath(chosen)
+    const chosen = authorizeConfigPath(result.filePaths[0]!)
+    await manager.useStore(new FileConfigStore(chosen))
     await saveSettings({ configPath: chosen })
     return { path: chosen, config: await manager.getConfig() }
   })
   ipcMain.handle('config:save-as', async () => {
     const result = await dialog.showSaveDialog({
-      title: '导出配置',
+      // Credentials never leave the encrypted store, so say so up front.
+      title: '导出配置（不含密码）',
       defaultPath: path.join(app.getPath('documents'), 'tunnel.conf'),
       filters: [{ name: '隧道配置', extensions: ['conf'] }]
     })
     if (result.canceled || !result.filePath) return null
-    const cfg = await manager.getConfig()
-    await fs.writeFile(result.filePath, serializeConfig(cfg), 'utf-8')
+    await fs.writeFile(result.filePath, await manager.exportConfig(), 'utf-8')
     return { path: result.filePath }
   })
   ipcMain.handle('config:reveal', async () => {
@@ -143,6 +194,7 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
       },
       sshPath,
       plinkPath,
+      secretsEncrypted: manager.canEncryptSecrets(),
       configPath: manager.getConfigPath(),
       runtimeDir: path.join(app.getPath('userData'), '.tunnel')
     }

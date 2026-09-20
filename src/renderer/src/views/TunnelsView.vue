@@ -2,6 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useTunnelStore } from '../composables/useTunnelStore'
 import { useUi } from '../composables/ui'
+import BorderGlow from '../components/bits/BorderGlow.vue'
+import DepthText from '../components/bits/DepthText.vue'
+import Dock from '../components/bits/Dock.vue'
+import ElectricBorder from '../components/bits/ElectricBorder.vue'
+import type { DockItemData } from '../components/bits/DockItem.vue'
 
 const { tunnels, busy, execute, refresh } = useTunnelStore()
 const { show, logTarget } = useUi()
@@ -9,6 +14,48 @@ const { show, logTarget } = useUi()
 const validating = ref(false)
 const showValidate = ref(false)
 const validateItems = ref<ValidateItem[]>([])
+
+/** Batch actions live in a Dock: items grow as the pointer sweeps across them. */
+const actionItems = computed<DockItemData[]>(() => [
+  {
+    icon: '▶',
+    label: '全部启动',
+    tone: 'primary',
+    disabled: busy.value,
+    onClick: () => void execute('start', 'all')
+  },
+  {
+    icon: '⏹',
+    label: '全部停止',
+    disabled: busy.value,
+    onClick: () => void execute('stop', 'all')
+  },
+  {
+    icon: '⟳',
+    label: '全部重启',
+    disabled: busy.value,
+    onClick: () => void execute('restart', 'all')
+  },
+  {
+    icon: '✓',
+    label: validating.value ? '校验中…' : '校验配置',
+    disabled: validating.value,
+    onClick: runValidate
+  }
+])
+
+/** Counters are rendered with the extruded DepthText face. */
+const depthProps = {
+  layers: 6,
+  depth: 0.9,
+  tilt: 4,
+  perspective: 320,
+  fontSize: '13px',
+  fontWeight: 600,
+  pointerTracking: false,
+  autoOrbit: false,
+  shadow: false
+} as const
 
 const groups = computed(() => {
   const map = new Map<string, TunnelView[]>()
@@ -70,20 +117,33 @@ onMounted(() => {
   <div class="view">
     <div class="toolbar">
       <div class="toolbar-left">
-        <button class="btn btn-primary" :disabled="busy" @click="execute('start', 'all')">
-          ▶ 全部启动
-        </button>
-        <button class="btn" :disabled="busy" @click="execute('stop', 'all')">⏹ 全部停止</button>
-        <button class="btn" :disabled="busy" @click="execute('restart', 'all')">⟳ 全部重启</button>
-        <button class="btn btn-ghost" :disabled="validating" @click="runValidate">
-          {{ validating ? '校验中…' : '✓ 校验配置' }}
-        </button>
+        <Dock :items="actionItems" />
       </div>
       <div class="toolbar-right">
-        <span class="meta-chip">共 {{ summary.total }} 个隧道</span>
-        <span class="meta-chip meta-green">{{ summary.running }} 运行</span>
-        <span class="meta-chip meta-amber">{{ summary.connecting }} 连接中</span>
-        <span class="meta-chip">启用 {{ summary.enabled }}</span>
+        <span class="meta-chip"
+          >共 <DepthText v-bind="depthProps" :text="String(summary.total)" /> 个隧道</span
+        >
+        <span class="meta-chip meta-green">
+          <DepthText
+            v-bind="depthProps"
+            :text="String(summary.running)"
+            face-color="var(--green)"
+            depth-color="color-mix(in srgb, var(--green) 45%, #000)"
+          />
+          运行
+        </span>
+        <span class="meta-chip meta-amber">
+          <DepthText
+            v-bind="depthProps"
+            :text="String(summary.connecting)"
+            face-color="var(--amber)"
+            depth-color="color-mix(in srgb, var(--amber) 45%, #000)"
+          />
+          连接中
+        </span>
+        <span class="meta-chip"
+          >启用 <DepthText v-bind="depthProps" :text="String(summary.enabled)"
+        /></span>
       </div>
     </div>
 
@@ -111,8 +171,16 @@ onMounted(() => {
       <button class="btn btn-primary" @click="show('config')">去配置</button>
     </div>
 
-    <div v-else class="groups">
-      <section v-for="group in groups" :key="group.name" class="card group-card">
+    <TransitionGroup v-else name="card" tag="div" class="groups">
+      <BorderGlow
+        v-for="group in groups"
+        :key="group.name"
+        class="group-card"
+        :edge-sensitivity="35"
+        :glow-radius="24"
+        :glow-intensity="0.85"
+        :cone-spread="22"
+      >
         <header class="group-header">
           <div class="group-title">
             <span class="group-name">{{ group.name }}</span>
@@ -134,7 +202,7 @@ onMounted(() => {
           </div>
         </header>
 
-        <div class="tunnel-table">
+        <TransitionGroup name="row" tag="div" class="tunnel-table">
           <div class="tunnel-row tunnel-head">
             <span class="col-status">状态</span>
             <span class="col-name">隧道</span>
@@ -142,10 +210,16 @@ onMounted(() => {
             <span class="col-map">本地 → 远端</span>
             <span class="col-actions">操作</span>
           </div>
-          <div
+          <ElectricBorder
             v-for="t in group.items"
             :key="t.key"
+            :active="t.state === 'running' || t.state === 'connecting'"
+            :color="t.state === 'running' ? '#2fbf71' : '#e8a13c'"
+            :chaos="0.08"
+            :border-radius="8"
+            :max-samples="320"
             class="tunnel-row"
+            content-class="electric-contents"
             :class="{ 'row-disabled': !t.enabled }"
           >
             <span class="col-status">
@@ -182,9 +256,9 @@ onMounted(() => {
               </button>
               <button class="btn btn-sm btn-ghost" @click="onShowLogs(t.key)">日志</button>
             </span>
-          </div>
-        </div>
-      </section>
-    </div>
+          </ElectricBorder>
+        </TransitionGroup>
+      </BorderGlow>
+    </TransitionGroup>
   </div>
 </template>

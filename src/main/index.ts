@@ -1,8 +1,9 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { createManager, registerIpc } from './tunnel/ipc'
+import { createManager, registerIpc } from './ipc'
+import { hardenWebContents, SECURE_WEB_PREFERENCES } from './security'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -16,7 +17,7 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      ...SECURE_WEB_PREFERENCES
     }
   })
 
@@ -24,10 +25,8 @@ function createWindow(): void {
     mainWindow.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
+  // Deny navigation, popups and permissions unless they belong to the app.
+  hardenWebContents(mainWindow.webContents)
 
   // HMR for renderer base on electron-vite cli.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -37,23 +36,39 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.stm.desktop')
-
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+/**
+ * Only one instance may run: a second copy would take over the same PID state
+ * files, log files and local ports as the first, and the two would then fight
+ * over start/stop decisions for the same tunnels.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const [existing] = BrowserWindow.getAllWindows()
+    if (!existing) return
+    if (existing.isMinimized()) existing.restore()
+    existing.focus()
   })
 
-  // Tunnel manager + IPC surface.
-  const manager = createManager()
-  await registerIpc(manager)
+  app.whenReady().then(async () => {
+    electronApp.setAppUserModelId('com.stm.desktop')
 
-  createWindow()
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
 
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // Tunnel manager + IPC surface.
+    const manager = createManager()
+    await registerIpc(manager)
+
+    createWindow()
+
+    app.on('activate', function () {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
   })
-})
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

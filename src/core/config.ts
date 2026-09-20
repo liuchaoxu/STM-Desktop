@@ -1,6 +1,5 @@
 /**
- * Config file parsing / serialization / validation for the tunnel manager.
- * Pure Node module (no Electron) so it can be unit-tested standalone.
+ * Config parsing / serialization / validation — platform agnostic.
  *
  * File format mirrors the original SSH-Tunnel-Manager `tunnel.conf`:
  *   [defaults]                -> shared defaults
@@ -8,9 +7,10 @@
  *   [tunnel:<group>:<name>]   -> a single port forward
  *   [<name>]                  -> legacy section, moved to group "default"
  *                                (or the group named by `group=...`)
+ *
+ * Reading and writing the file is the platform's job: see `ConfigStore` in
+ * `./storage`.
  */
-import { promises as fs } from 'fs'
-import * as path from 'path'
 import type { ConfigData, ResolvedTunnel, TunnelDef } from './types'
 import { TunnelError } from './types'
 
@@ -182,28 +182,6 @@ export function serializeConfig(cfg: ConfigData): string {
   return out.join('\n')
 }
 
-/** Read + parse a config file. Creates nothing. */
-export async function loadConfigFile(filePath: string): Promise<ConfigData> {
-  let text: string
-  try {
-    text = await fs.readFile(filePath, 'utf-8')
-  } catch (error) {
-    const e = error as NodeJS.ErrnoException
-    if (e.code === 'ENOENT') throw new TunnelError(`configuration file not found: ${filePath}`)
-    throw error
-  }
-  return parseConfig(text)
-}
-
-/** Atomically write a config file (tmp + rename). */
-export async function saveConfigFile(filePath: string, cfg: ConfigData): Promise<void> {
-  const text = serializeConfig(cfg)
-  await fs.mkdir(path.dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp`
-  await fs.writeFile(tmp, text, 'utf-8')
-  await fs.rename(tmp, filePath)
-}
-
 /** Merge defaults -> group -> tunnel into one effective value map. */
 export function mergeTunnel(cfg: ConfigData, def: TunnelDef): ResolvedTunnel {
   const group = cfg.groups.find((g) => g.name.toLowerCase() === def.group.toLowerCase())
@@ -274,6 +252,12 @@ export function resolveTarget(
   return enabledOnly ? items.filter((t) => t.enabled) : items
 }
 
+/**
+ * Placeholder shipped in the default template. It is never treated as a real
+ * secret, so "恢复默认模板" keeps producing a readable file.
+ */
+export const PASSWORD_PLACEHOLDER = 'replace-with-password'
+
 /** Default config template written on first run. */
 export const DEFAULT_CONFIG_TEXT = `# SSH Tunnel Manager 配置文件
 #
@@ -291,7 +275,7 @@ strict_host_key_checking=accept-new
 [group:feishu]
 server=ssh.example.com
 username=deploy
-password=replace-with-password
+password=${PASSWORD_PLACEHOLDER}
 # 使用 Plink 时建议填写人工核验的 SHA256 主机指纹
 hostkey=SHA256:replace-with-server-fingerprint
 

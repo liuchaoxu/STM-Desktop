@@ -25,18 +25,17 @@
 ## 技术架构
 
 ```
-渲染进程 (Vue 3)          预加载 (preload)           主进程 (Electron / Node)
-┌─────────────────┐   contextBridge   ┌───────────┐   ┌──────────────────────┐
-│ Tunnels 视图     │ ◄──────────────► │ window.api │ ◄►│ ipc.ts（IPC 通道）    │
-│ Config 视图      │   tunnel/config/ │ (类型安全)   │   │  ├─ config.ts 配置引擎 │
-│ Logs 视图        │   app 三大命名空间 │            │   │  └─ manager.ts 进程管理│
-│ Toast / 弹窗     │                  │            │   │  └─ 状态文件 + 日志    │
-└─────────────────┘                  └───────────┘   └──────────────────────┘
+渲染进程 (Vue 3)  ──contextBridge──►  preload: window.api  ──IPC──►  主进程 (Electron / Node)
+                                                                    ├─ src/main/ipc.ts        IPC 通道、对话框、路径持久化
+                                                                    ├─ src/core/manager.ts    配置生命周期 + 生命周期编排（平台无关）
+                                                                    ├─ src/core/config.ts     配置解析/序列化/校验/继承合并
+                                                                    └─ src/platforms/node/    桌面传输层：spawn ssh/plink、PID 状态、日志
 ```
 
-- **主进程**（`src/main/tunnel/`）：配置解析/序列化/校验、SSH 客户端选择、子进程生命周期管理，全部基于 Node 标准库，不依赖第三方包
+- **平台无关核心**（`src/core/`）：领域模型、配置解析/序列化/校验/继承合并、生命周期编排（并发锁、批量调度、视图投影），不引用 `fs`/`path`/`net`/`child_process`（由 ESLint 强制），可跑在任何运行时
+- **平台实现**（`src/platforms/node/`）：桌面传输层，基于 Node 标准库 spawn 系统 `ssh` 或内置 `plink`，负责 PID 状态文件、端口探测、停止升级与日志轮转，不依赖第三方包。新增平台（Android / iOS）只需实现 `ConfigStore` / `SecretStore` / `TunnelTransport` 三个接口
 - **预加载**（`src/preload/`）：通过 `contextBridge` 暴露类型安全的 `window.api`（`tunnel` / `config` / `app`）
-- **渲染进程**（`src/renderer/`）：Vue 3 单页界面，2 秒轮询刷新隧道状态
+- **渲染进程**（`src/renderer/`）：Vue 3 单页界面，2 秒轮询刷新隧道状态；样式为 Tailwind v4（**未启用 Preflight**，且工具类位于 `utilities` 层，因此不会覆盖迁移中的存量 CSS）+ 手写 CSS；动效与背景来自 [vue-bits](https://vue-bits.dev) 的组件移植（`components/bits/`），其中 WebGL 部分依赖 `ogl`，Dock 的弹簧依赖 `motion-v`
 
 ## 快速开始
 
@@ -65,7 +64,17 @@ Windows 安装包为 **NSIS 向导式安装**（`dist/stm-desktop-1.0.0-setup.ex
 
 ## 界面操作指南
 
-顶部工具栏显示当前配置文件路径、SSH / Plink 可用性，以及进行中的批量操作提示。
+顶部工具栏是一块**玻璃板**（半透明 + 背景模糊，背后的丝绸会透出来）：金属 **Stm** 字标、隧道 / 配置 / 日志 三个页签、状态跑马灯、右侧的作者链接（配置文件的路径现在显示在「配置」页顶部，不在工具栏里）。隧道页与配置页的动作按钮行**固定在页面顶部**，长列表里滚动时不会跟着走。
+
+页签是镜面高光按钮（WebGL2）：指针靠近时，按钮边缘会沿圆角泛起一道跟随指针方向的高光；当前页以强调色底 + 强调色文字标示。左上角是金属渲染的 **Stm** 字标。
+
+页签右侧是一条**状态跑马灯**（LogoLoop）：SSH 可用性、Plink 来源、密码是否加密、当前平台（tooltip 里给出 Electron / Node / Chrome 版本）四个**毛玻璃芯片**（半透明 + 模糊 + 不定期扫过的高光）以约 26 px/s 缓慢横向漂移。整条流马灯的宽度**正好等于一份序列**，所以同一条状态不会在屏幕上同时出现两次；**指针移入即暂停**，方便看清某个状态；进行中的批量操作提示不会漂走，它固定在跑马灯左侧。
+
+页面顶部的动作按钮行是一个 **Dock**：指针扫过时，条目按距离用弹簧物理放大（悬停不会改变这一行的高度，因此不会推着页面上下跳）。隧道数 / 运行 / 连接中 / 启用等计数用 3D 挤出文字（DepthText）显示。
+
+**运行中 / 连接中**的隧道行会亮起**电气边框**（沿圆角矩形流动的电流状描边：绿色 = 运行中、琥珀色 = 连接中）；日志页的**标准输出 / 标准错误**两个实时日志框也带同样的边框（绿色 / 红色，刷新中转为蓝色）。
+
+「隧道」与「配置」页带一层缓慢流动的丝绸着色器背景（WebGL）；卡片在鼠标靠近边缘时会亮起边缘光辉。全部动效都尊重系统的「减少动态效果」设置（`prefers-reduced-motion`）。
 
 ### 隧道页（默认）
 
@@ -77,12 +86,16 @@ Windows 安装包为 **NSIS 向导式安装**（`dist/stm-desktop-1.0.0-setup.ex
 
 ### 配置页
 
-所有修改先停留在内存中，点 **保存配置**（有未保存修改时按钮高亮）才写回磁盘；校验错误会以红色横幅给出精确原因。
+**概览是一张卡片网格**：默认设置一张卡片，每个组各一张卡片。组卡片上直接显示 `用户名@服务器:端口` 与隧道数量 / 运行中数量；**点卡片进入组**，**点卡片上的「编辑组」**打开组信息弹窗（服务器、认证、端口等，含「高级 / 其他选项」）。
 
+- **进入组后**：组内每条隧道都是独立卡片，卡片上显示状态点（运行中 / 连接中 / 已停止）、`本地 → 远端` 与 PID；点卡片就地展开编辑（常用字段表单 + 高级键值编辑器），再点收起 —— 折叠不会丢失未完成的编辑
+- **未定义组**：如果隧道引用了不存在的组（例如旧式 `[隧道名]` 段会落在隐式的 `default` 组），会以「未定义」卡片单独列出（这类隧道只继承默认设置），点「创建组配置」即可补上 `[group:…]` 段
 - **默认设置**：`[defaults]`，全部隧道的默认值（客户端、SSH 端口、绑定地址、默认启用、主机密钥策略等）
-- **组**：`[group:名称]`，组内隧道共享的服务器与认证信息；改名时组内隧道自动跟随；删除组时组内隧道保留但不再继承该组配置
-- **隧道**：`[tunnel:组:名称]`，必填项为 本地端口 / 远端主机 / 远端端口（另需组的 server/username）；常用字段以表单呈现，其余放入“高级/其他选项”键值编辑器
-- **文件操作**：重新加载（丢弃未保存修改）、打开配置…（切换到已有配置文件，如原来的 `tunnel.conf`）、另存为…、打开配置目录（在资源管理器中定位）、恢复默认模板
+- **组**：`[group:名称]`，组内隧道共享的服务器与认证信息；组名改动时组内隧道自动跟随；删除组时组内隧道保留但不再继承该组配置
+- **隧道**：`[tunnel:组:名称]`，必填项为 本地端口 / 远端主机 / 远端端口（另需组的 server/username）；卡片展开后是常用字段表单，其余选项放在「高级 / 其他选项」键值编辑器里
+- **文件操作**：重新加载（丢弃未保存修改）、打开配置…（切换到已有配置文件，如原来的 `tunnel.conf`）、另存为…（不含密码）、打开配置目录（在资源管理器中定位）、恢复默认模板
+
+所有修改先停留在内存中，点 **保存配置**（有未保存修改时按钮高亮并提示）才写回磁盘；校验错误会以红色横幅给出精确原因。
 
 ### 日志页
 
@@ -98,6 +111,7 @@ Windows 安装包为 **NSIS 向导式安装**（`dist/stm-desktop-1.0.0-setup.ex
   - Linux：`~/.config/STM Desktop/tunnel.conf`
 - 在「配置」页点 **打开配置…** 可切换到其它文件（路径会记录在 `settings.json`，下次启动自动沿用）
 - 运行时状态与日志存放于 `<用户数据目录>/.tunnel/`（PID 状态 JSON + `*.out.log` / `*.err.log`）
+- 加密后的密码存放于 `<用户数据目录>/secrets.json`（仅在系统有可用凭据库时生成；密文绑定当前系统账户）
 
 ### 配置格式
 
@@ -143,7 +157,8 @@ remote_port=3306
 | `client` | `auto` | `auto` / `ssh` / `plink.exe` / `plink` 或自定义路径；`auto` 时 Windows 密码认证优先用内置 plink，其余情况优先系统 OpenSSH |
 | `server_port` | `22` | SSH 服务器端口 |
 | `local_bind` | `127.0.0.1` | 本地绑定地址（填 `0.0.0.0` 可对外暴露，注意安全） |
-| `password` | — | 密码（仅 Plink 或 Linux/macOS AskPass；Windows 下 OpenSSH 不支持密码） |
+| `password` | — | 密码（仅 Plink 或 Linux/macOS AskPass；Windows 下 OpenSSH 不支持密码）。在界面上正常填写即可，保存时会自动移入加密存储 |
+| `password_ref` | — | 密码在加密存储中的引用键，由程序自动维护，无需手写 |
 | `private_key` | — | 私钥路径：绝对路径 / 相对项目目录 / `~/.ssh/...` |
 | `hostkey` | — | SHA256 主机指纹（仅 Plink） |
 | `strict_host_key_checking` | `yes` | 仅 OpenSSH：`yes` / `accept-new` / `no`（`no` 不安全） |
@@ -157,6 +172,16 @@ remote_port=3306
 - **状态**：进程存活 + 本地端口已开 = 运行中；进程存活但端口未开 = 连接中；否则为已停止（并自动清理失效状态文件）
 - **停止**：Windows 终止进程，Linux/macOS 终止整个会话（进程组）
 - **密码认证**：Windows 自动选择内置 `resources/plink.exe`（`-pw`）；Linux/macOS 使用 OpenSSH 原生 `SSH_ASKPASS` 机制（密码通过子进程环境变量传递，不写入命令行或脚本文件）
+
+## 安全设计
+
+- **渲染进程运行在沙箱中**：`sandbox: true` + `contextIsolation: true` + `nodeIntegration: false`，界面只能通过 `window.api` 这条类型化通道与主进程通信（preload 保持零第三方依赖——沙箱里的 `require()` 只能解析 Electron 自身模块）
+- **导航与外部链接白名单**：`will-navigate` 只放行应用自身页面（开发时同源、生产时同 bundle 目录），其余一律拦截；外部链接只把 `http:` / `https:` 交给系统浏览器，`file:` 与自定义 scheme 全部拒绝；不创建弹窗、不嵌入 webview、不授予任何权限（摄像头 / 麦克风 / 定位 / 通知等一律拒绝）
+- **IPC 入参校验**：主进程对每个通道的入参做结构与规模校验（类型、非空、长度与数量上限），畸形或恶意 payload 在进入核心层之前就被拒绝
+- **配置文件路径白名单**：只有通过原生对话框选择的路径（或应用自己持久化到 `settings.json` 的路径）才能被切换为当前配置，避免被诱导读取任意文件
+- **密码不进程命令行**：使用随应用分发的 Plink（0.84）时，密码经 `-pwfile` 以 0600 权限暂存、会话结束即删除、下次启动清扫残留；只有版本未知的用户自备 plink 才回退到 `-pw`
+- **密码加密存储**：配置文件中只保留 `password_ref`，密文由 Electron `safeStorage`（Windows DPAPI / macOS Keychain / Linux libsecret）加密后存放于 `<用户数据目录>/secrets.json`，界面与隧道进程使用时才在内存中解密；顶栏会显示"密码已加密"。若系统没有可用凭据库（例如 Linux 缺少 libsecret），则**保持明文存储并在顶栏显示"密码明文"**，不会假装加密
+- **导出不含密码**：`另存为…` 会剔除密码与密码引用，对话框标题即为"导出配置（不含密码）"
 
 ## 测试
 
@@ -172,6 +197,16 @@ npm run smoke
 
 `npm run smoke` 覆盖：真实 `tunnel.conf` 解析与三级继承合并、序列化往返一致性、旧格式段兼容、缺字段/非法端口/重复隧道/重复键等错误场景、目标解析（all/组/精确）、plink 与 OpenSSH 命令构建（含密码脱敏）、完整的 启动→状态→日志→重复启动→停止→重启 生命周期、端口占用冲突、默认模板有效性。
 
+其中**平台无关核心**用一个内存 `ConfigStore` + 内存 `SecretStore` + 内存 `TunnelTransport` 驱动（零进程、零 socket、零文件），覆盖批量启停/重启、按隧道的生命周期锁（并发启动只起一次）、传输失败上抛、端口冲突、日志与校验投影、配置切换失败回滚，以及完整的凭据流程（明文注入界面、密文抽取落盘、导出剔除凭据、重命名迁移、清空删除、无凭据库时保持明文）；**桌面传输层**则用真实 spawn 的假 SSH 客户端覆盖进程启停、状态文件清理、停止升级（SIGKILL）、日志轮转与 `-pwfile` 暂存文件生命周期；另有 URL 策略与 IPC 入参校验的断言。共 132 项断言。
+
+其中密码加密的"加密 → 落盘 → 解密"往返由端到端检查一并验证。
+
+`npx electron scripts/ipc-check.cjs` 除断言外，还会把各界面状态截图写到 `out/shots/*.png`（隧道页含丝绸背景、配置页、组详情、隧道展开、组信息弹窗、日志页，以及卡片 hover 态与 Dock 放大态），并读回像素统计来判断背景是否真的在渲染与动画。
+
+该脚本还会对**动效本身**取证，前提是窗口可见：它先 `show() + setAlwaysOnTop(true) + focus()` 并打印 `WINDOW {visible,minimized,focused,visibility}`。这一步不可省略 —— Windows 的遮挡检测会把被其他窗口盖住的窗口判为 `hidden`，Chromium 随之节流 `requestAnimationFrame`，于是跑马灯位移、Dock 放大、背景动画全部会量出"没生效"的假象。窗口可见后，脚本读取跑马灯轨道 0.9 秒前后的 `transform`（应位移约 23–24px，对应 26 px/s）、指针移上 Dock 条目前后的 `clientHeight`（26 → 36，同时打印指针下真正命中的元素），以及同页两帧的像素差（`changedPct` 约 26–32%）。
+
+界面动效的取证还包括：跑马灯同屏是否重复（`maxVisibleRepeat`，应为 1）、间距是否真的生效（`gap`，并额外用一个离屏探针元素验证那条工具类本身有没有被 CSS 层序吃掉）、毛玻璃是否生效（`backdropFilter`，前缀与标准写法都读）、以及每个界面上电气边框的宿主数量与画布上**实际描边的墨迹像素数**（`ink`）。隧道行的电气边框需要"运行中 / 连接中"才点亮，而启动真实隧道会真的去连用户的服务器，所以脚本改为伪造应用自己的 connecting 判据：往运行时目录写一个 `pid` 指向探针自身、端口从未监听的状态文件，等 2 秒轮询算出状态后取证，随后立刻删除该文件（截图 `out/shots/11-row-electric-border.png`）。
+
 端到端 IPC 检查（可选，需先 `npm run build`）：
 
 ```bash
@@ -185,13 +220,21 @@ npx electron scripts/ipc-check.cjs
 ```
 STM Desktop/
 ├─ src/
-│  ├─ main/                     # Electron 主进程
+│  ├─ core/                     # 平台无关领域层（禁止引用 fs/net/child_process/electron）
+│  │  ├─ types.ts               # 领域模型（配置/隧道/视图/错误）
+│  │  ├─ config.ts              # 配置解析/序列化/校验/三级继承合并
+│  │  ├─ storage.ts             # ConfigStore / SecretStore 接口
+│  │  ├─ transport.ts           # TunnelTransport 接口（唯一与平台耦合的能力）
+│  │  └─ manager.ts             # 配置生命周期 + 生命周期编排（锁/并发/视图投影）
+│  ├─ platforms/
+│  │  └─ node/                  # 桌面实现
+│  │     ├─ config-store.ts     # FileConfigStore（原子写）
+│  │     ├─ exec-transport.ts   # spawn ssh/plink、PID 状态、端口探测、日志轮转
+│  │     ├─ tail-file.ts        # 多字节安全的分块尾部读取
+│  │     └─ index.ts            # createTunnelManager 装配
+│  ├─ main/                     # Electron 壳
 │  │  ├─ index.ts               # 应用入口：创建窗口、注册 IPC
-│  │  └─ tunnel/
-│  │     ├─ types.ts            # 内部类型定义
-│  │     ├─ config.ts           # 配置解析/序列化/校验（纯 Node，可独立测试）
-│  │     ├─ manager.ts          # 进程生命周期管理（纯 Node，可独立测试）
-│  │     └─ ipc.ts              # IPC 通道、对话框、路径持久化
+│  │  └─ ipc.ts                 # IPC 通道、对话框、路径持久化
 │  ├─ preload/
 │  │  ├─ index.ts               # contextBridge 暴露 window.api
 │  │  └─ api.d.ts               # 全局 API 类型（渲染进程与主进程共用）
@@ -200,8 +243,11 @@ STM Desktop/
 │        ├─ App.vue             # 布局：头部/页签/视图切换
 │        ├─ views/              # TunnelsView / ConfigView / LogsView
 │        ├─ components/         # KeyValueEditor / ToastHost
+│        │  ├─ bits/            # 动效与背景件：SpecularButton / Dock(+DockItem) / MetallicPaint / Silk / BorderGlow / DepthText / LogoLoop / ElectricBorder / AnimatedContent / RevealPanel
+│        │  │                    # 未使用（保留备查）：GooeyNav / SpotlightCard / ShinyText / CountUp
+│        │  └─ config/          # 配置页卡片：SummaryCard / TunnelCard / OptionsEditor / GroupEditorModal
 │        ├─ composables/        # 状态轮询、Toast、页签共享状态
-│        └─ assets/main.css     # 深色主题样式
+│        └─ assets/main.css     # 深色主题样式 + 动效
 ├─ scripts/
 │  ├─ tunnel-smoke.ts           # 引擎冒烟测试（npm run smoke）
 │  └─ ipc-check.cjs             # 端到端 IPC 检查
@@ -217,7 +263,7 @@ STM Desktop/
 - **Windows 密码认证报错“use client=plink.exe for password authentication on Windows”**：OpenSSH 在 Windows 上不支持命令行密码，请改用密码认证时在组/隧道设置 `client=plink.exe`（或保持 `auto`，应用会自动使用内置 plink）。
 - **首次连接提示主机密钥**：建议先运行一次 `ssh user@server` 核验并保存主机密钥；OpenSSH 可设 `strict_host_key_checking=accept-new`，Plink 建议在 `hostkey` 中填写人工核验的 SHA256 指纹。
 - **关闭应用后隧道还在运行**：隧道以分离进程运行，这是有意为之（与命令行版一致），重新打开应用可继续管理。
-- **配置文件权限**：含密码的配置文件建议限制为当前用户可读写（Linux/macOS：`chmod 600 tunnel.conf`）。
+- **配置文件权限**：启用密码加密后 `tunnel.conf` 不再包含明文密码，但仍建议限制为当前用户可读写（Linux/macOS：`chmod 600 tunnel.conf`）。`secrets.json` 中的密文只能在当前系统账户下解密，拷到其它机器或账户会失效，需要重新填写密码。
 - **打包**：`npm run build:win` 会调用 electron-builder 下载打包工具，`.npmrc` 已配置国内镜像；NSIS 安装器已开启“选择安装目录”（`electron-builder.yml` 中 `oneClick: false` + `allowToChangeInstallationDirectory: true`）。离线环境可跳过打包，直接使用 `out/` 产物或 `npm run dev`。
 
 ## 许可证与第三方组件

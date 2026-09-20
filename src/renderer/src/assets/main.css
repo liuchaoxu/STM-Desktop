@@ -1,4 +1,52 @@
+/*
+ * Tailwind v4: theme tokens + utilities.
+ *
+ * Preflight (Tailwind's global reset) is deliberately NOT imported: the app
+ * ships its own ~1300 lines of CSS, and a reset would silently change its
+ * spacing and typography underneath the parts that are not migrated yet. Turn it
+ * on once the migration is complete.
+ *
+ * Utilities land in the `utilities` layer, so they rank below the unlayered CSS
+ * in this file — i.e. adding Tailwind cannot change the existing UI by accident.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
 @import './base.css';
+
+@theme {
+  /* Ship only our own palette: drop Tailwind's default color namespace instead
+     of carrying ~20 kB of unused color variables into the bundle. */
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+}
+
+@theme inline {
+  /* Every token is sourced from the `:root` block below, so there is exactly one
+     definition of each value. Utilities: bg-canvas / bg-surface / text-ink /
+     text-ink-muted / border-line / text-brand / bg-brand-soft / font-mono … */
+  --color-canvas: var(--bg);
+  --color-canvas-soft: var(--bg-soft);
+  --color-surface: var(--panel);
+  --color-surface-2: var(--panel-2);
+  --color-line: var(--border);
+  --color-line-soft: var(--border-soft);
+  --color-ink: var(--text);
+  --color-ink-muted: var(--muted);
+  --color-brand: var(--accent);
+  --color-brand-soft: var(--accent-soft);
+  --color-ok: var(--green);
+  --color-ok-soft: var(--green-soft);
+  --color-warn: var(--amber);
+  --color-warn-soft: var(--amber-soft);
+  --color-danger: var(--red);
+  --color-danger-soft: var(--red-soft);
+  --font-mono: var(--mono);
+  --radius-card: 10px;
+  --radius-control: 7px;
+  --radius-pill: 999px;
+}
 
 :root {
   --bg: #0e1013;
@@ -18,6 +66,14 @@
   --red: #e5484d;
   --red-soft: rgba(229, 72, 77, 0.14);
   --mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace;
+
+  /* GooeyNav particle palette. The gooey filter (`blur + contrast(100)` + a
+     `lighten` blend) thresholds everything to pure light, so these are light
+     tints: they read as one white blob, the way the component is designed. */
+  --color-1: #ffffff;
+  --color-2: #dce7ff;
+  --color-3: #b9d0ff;
+  --color-4: #f2f6ff;
 }
 
 html,
@@ -55,86 +111,10 @@ body {
   height: 100%;
 }
 
-.app-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
-  background: var(--bg-soft);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.brand-icon {
-  font-size: 18px;
-}
-
-.brand-title {
-  font-weight: 700;
-  font-size: 15px;
-  white-space: nowrap;
-}
-
-.brand-sub {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.chip-path {
-  max-width: 380px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.tab {
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  padding: 5px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.tab:hover {
-  color: var(--text);
-}
-
-.tab.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.env {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.busy-chip {
-  color: var(--amber);
-  font-size: 12px;
-}
+/* Header layout moved to Tailwind utilities in App.vue (slice 1 of the
+   migration). The aurora sheen below stays in CSS — a pseudo-element with an
+   animated gradient is not something utilities express well.
+   `.chip` / `.meta-chip` are still here because other views use them too. */
 
 .app-main {
   flex: 1;
@@ -175,6 +155,73 @@ body {
   padding: 2px 8px;
   background: var(--panel);
   white-space: nowrap;
+}
+
+/*
+ * Frosted-glass chip (the marquee's status items): a translucent pane that blurs
+ * whatever is behind it, with a lit top edge, a soft contact shadow and a slow
+ * specular sweep. The sweep is what makes it read as glass rather than as a
+ * tinted pill, and it is switched off under `prefers-reduced-motion`.
+ *
+ * Deliberately placed *before* the tone classes: those only set `color` and
+ * `border-color`, and same-specificity rules resolve by source order.
+ */
+.glass-chip {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 3px 10px;
+  border-color: color-mix(in srgb, #ffffff 16%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 12%, transparent),
+      color-mix(in srgb, #ffffff 3%, transparent)
+    ),
+    color-mix(in srgb, var(--panel) 55%, transparent);
+  backdrop-filter: blur(8px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 20%, transparent),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 1px 5px rgba(0, 0, 0, 0.3);
+}
+
+/*
+ * Chips inside the marquee are atomic inline-level boxes. As plain inline boxes
+ * their padding and border bleed a few pixels below the line box, and because the
+ * marquee clips its overflow that bleed showed up as a 5px vertical scrollbar on
+ * the header. An `inline-flex` box has a definite height, so it sizes the line box
+ * instead of overflowing it.
+ */
+.logoloop .meta-chip {
+  display: inline-flex;
+  align-items: center;
+}
+
+.glass-chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 62%
+  );
+  transform: translateX(-120%);
+  animation: glass-sheen 6.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes glass-sheen {
+  0%,
+  55% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
 }
 
 .meta-green {
@@ -319,13 +366,23 @@ body {
 
 /* ---------------------------------------------------------------- toolbar */
 
+/* Sticky action row: it must not scroll away with the page. The negative
+   margins cancel `.app-main`'s padding so the bar spans the full width, while
+   its own padding keeps the content aligned with the page. */
 .toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin: -14px -16px 14px;
+  padding: 14px 16px 10px;
   flex-wrap: wrap;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .toolbar-left,
@@ -600,38 +657,8 @@ select.input option {
   word-break: break-all;
 }
 
-.group-editor,
-.tunnel-editor {
-  border-bottom: 1px solid var(--border-soft);
-  padding: 12px 16px;
-}
-
-.group-editor:last-child,
-.tunnel-editor:last-child {
-  border-bottom: none;
-}
-
-.group-editor-head,
-.tunnel-editor-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
-}
-
-.input-group-name {
-  font-weight: 600;
-  width: 200px;
-}
-
-.tunnel-editor-title {
-  font-weight: 700;
-  font-size: 13.5px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* `.group-editor` / `.tunnel-editor` are gone: the config page is now a card
+   grid (see the "config: card layout" section at the end of this file). */
 
 .form-grid {
   display: grid;
@@ -755,6 +782,8 @@ select.input option {
   min-height: 260px;
   overflow: auto;
   margin: 0;
+  /* Matches the ElectricBorder wrapper drawn around it. */
+  border-radius: 10px;
   padding: 12px 14px;
   font-size: 12px;
   line-height: 1.55;
@@ -893,5 +922,555 @@ select.input option {
   .col-actions {
     grid-column: 1 / -1;
     justify-content: flex-start;
+  }
+}
+
+/* ---------------------------------------------------------------- motion */
+/*
+ * Animation language borrowed from vue-bits (Count Up / Spotlight Card /
+ * Shiny Text / Animated List), reimplemented in plain CSS + Vue transitions:
+ * no Tailwind and no extra runtime dependency, and every effect degrades when
+ * the user asks for reduced motion.
+ */
+
+/* The tab bar's sliding indicator used to live here; it is now GooeyNav's
+   own pill (components/bits/GooeyNav.vue). */
+
+/* Aurora-style sheen along the header's bottom edge. `position: relative` comes
+   from the `relative` utility on <header>; the pseudo-element itself stays in
+   CSS. */
+/*
+ * The header is a glass pane rather than a solid bar: the silk backdrop behind it
+ * shows through, blurred. It is also what gives the status chips something to
+ * frost — without it their `backdrop-filter` would sample one flat colour.
+ */
+.app-header {
+  background: color-mix(in srgb, var(--bg-soft) 80%, transparent);
+  /* Only the standard property: writing the `-webkit-` alias by hand makes the
+   * build's minifier drop this one and keep the alias (see the roadmap note). */
+  backdrop-filter: blur(14px) saturate(140%);
+}
+
+/*
+ * ElectricBorder wraps its slot in a box of its own. Tunnel rows are CSS grids, so
+ * that box has to disappear from layout or the row's five columns would collapse
+ * into one item — the wrapper's children are what the grid must see.
+ */
+.electric-contents {
+  display: contents;
+}
+
+.app-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  opacity: 0.5;
+  pointer-events: none;
+  animation: header-sheen 7s linear infinite;
+}
+
+@keyframes header-sheen {
+  from {
+    background-position: -100% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* Status dots: breathing when healthy, quick pulse while connecting. */
+.dot-running {
+  animation: dot-breathe 2.6s ease-in-out infinite;
+}
+
+.dot-connecting {
+  animation: dot-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes dot-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(47, 191, 113, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(47, 191, 113, 0);
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+/* Buttons lift slightly instead of flipping state instantly. */
+.btn {
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Group cards (Animated List). */
+.card-enter-active,
+.card-leave-active,
+.card-move {
+  transition:
+    opacity 0.3s ease,
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.card-enter-from {
+  opacity: 0;
+  transform: translateY(10px) scale(0.99);
+}
+
+.card-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* Tunnel rows (Animated List). */
+.row-enter-active,
+.row-move {
+  transition:
+    opacity 0.26s ease,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.row-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.row-enter-from {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
+.row-leave-to {
+  opacity: 0;
+}
+
+/* Page switch. */
+.view-enter-active,
+.view-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.view-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.view-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
+
+/* Busy indicator. */
+.busy-enter-active,
+.busy-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.busy-enter-from,
+.busy-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+/* Toasts: slight overshoot so they land springy. */
+.toast-enter-active {
+  transition:
+    opacity 0.3s ease,
+    transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.toast-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(24px) scale(0.96);
+}
+
+.toast-move {
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ------------------------------------------------------- config: card layout */
+/*
+ * The config page is an overview of cards that drills into a group. Cards reuse
+ * the existing `.card` surface; only the click affordance, the grid and the
+ * drill-down motion are new.
+ */
+
+.config-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.card-grid > .card {
+  margin-bottom: 0;
+}
+
+/* Cards now own their surface through <BorderGlow> (background, border radius
+   and elevation are inline styles there), so only layout lives here. */
+.section-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.section-body {
+  display: block;
+  width: 100%;
+  padding: 14px 16px 12px;
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.section-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-icon {
+  font-size: 16px;
+}
+
+.section-title {
+  font-weight: 700;
+  font-size: 14.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-spacer {
+  flex: 1;
+}
+
+.section-sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-stats {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.section-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px 12px;
+  margin-top: auto;
+  border-top: 1px solid var(--border-soft);
+}
+
+.section-hint {
+  font-size: 11.5px;
+}
+
+.section-action-end {
+  margin-left: auto;
+}
+
+.add-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 136px;
+  padding: 16px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.add-card:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.add-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------ config: group detail */
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.detail-head h2 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.detail-spacer {
+  flex: 1;
+}
+
+.detail-note {
+  font-size: 12.5px;
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+
+.detail-note code {
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tunnel-card.is-open {
+  /* BorderGlow owns the box-shadow, so the open state is carried by the accent
+     border and the rotated chevron. */
+  border-color: var(--accent);
+}
+
+.tunnel-map {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  margin: 6px 0 2px;
+  min-width: 0;
+}
+
+.chevron {
+  color: var(--muted);
+  font-size: 12px;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.chevron-open {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+.card-body {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.config-path {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------ config: modals */
+
+.modal-wide {
+  max-width: 680px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.modal-head h2 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.modal-hint {
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.modal-spacer {
+  flex: 1;
+}
+
+.modal-wide .modal-actions {
+  margin-top: 18px;
+}
+
+/* --------------------------------------------------------- config: motion */
+/* Drill-down and card entrance, in the vue-bits "Animated Content" /
+   "Animated List" spirit: pure CSS, no runtime dependency. */
+
+.slide-forward-enter-active,
+.slide-forward-leave-active,
+.slide-back-enter-active,
+.slide-back-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slide-forward-enter-from {
+  opacity: 0;
+  transform: translateX(26px);
+}
+
+.slide-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
+}
+
+.slide-back-enter-from {
+  opacity: 0;
+  transform: translateX(-26px);
+}
+
+.slide-back-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+.stagger-enter-active {
+  transition:
+    opacity 0.3s ease,
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: calc(var(--i, 0) * 45ms);
+}
+
+.stagger-leave-active {
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.stagger-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.985);
+}
+
+.stagger-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+.stagger-move {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.modal-enter-active {
+  transition: opacity 0.18s ease;
+}
+
+.modal-enter-active .modal {
+  animation: modal-pop 0.26s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.modal-leave-active {
+  transition: opacity 0.14s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+@keyframes modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  .app-header::after {
+    display: none;
+  }
+
+  .glass-chip::after {
+    display: none;
   }
 }

@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer — typed in index.d.ts.
+/**
+ * The renderer's entire surface, typed in `api.d.ts`.
+ *
+ * This script must stay dependency-free: it runs sandboxed, where `require()`
+ * can only resolve Electron's own modules. A third-party import here (such as
+ * `@electron-toolkit/preload`, which used to expose an unused `window.electron`)
+ * fails to resolve and silently takes the whole bridge down with it.
+ */
 const api = {
   tunnel: {
     list: (): Promise<TunnelView[]> => ipcRenderer.invoke('tunnel:list'),
@@ -31,19 +37,8 @@ const api = {
   }
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
+try {
+  contextBridge.exposeInMainWorld('api', api)
+} catch (error) {
+  console.error('failed to expose window.api', error)
 }

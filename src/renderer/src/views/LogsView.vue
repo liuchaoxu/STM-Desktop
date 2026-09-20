@@ -1,10 +1,24 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import Dock from '../components/bits/Dock.vue'
+import ElectricBorder from '../components/bits/ElectricBorder.vue'
+import type { DockItemData } from '../components/bits/DockItem.vue'
 import { useTunnelStore } from '../composables/useTunnelStore'
 import { useUi } from '../composables/ui'
 
 const { tunnels, refresh } = useTunnelStore()
 const { activeTab, logTarget } = useUi()
+
+/** The only action in this row is a refresh; the rest are inputs, which stay
+ *  outside the dock (a magnifying pill around a `<select>` helps nobody). */
+const refreshItems = computed<DockItemData[]>(() => [
+  {
+    icon: '🔄',
+    label: fetching.value ? '刷新中…' : '刷新',
+    disabled: fetching.value,
+    onClick: () => void fetchLogs()
+  }
+])
 
 const payloads = ref<LogPayload[]>([])
 const lines = ref(200)
@@ -100,7 +114,7 @@ onUnmounted(() => stopPolling())
           <option :value="500">500 行</option>
           <option :value="1000">1000 行</option>
         </select>
-        <button class="btn" :disabled="fetching" @click="fetchLogs">刷新</button>
+        <Dock :items="refreshItems" />
         <label class="check">
           <input v-model="autoRefresh" type="checkbox" />
           自动刷新
@@ -136,7 +150,15 @@ onUnmounted(() => stopPolling())
             标准输出 <span class="hint mono">{{ selected?.outPath }}</span>
           </h2>
         </header>
-        <pre ref="outBox" class="log-box mono">{{ selected?.output }}</pre>
+        <ElectricBorder
+          :active="Boolean(selected?.output)"
+          :color="fetching ? '#4f8cff' : '#2fbf71'"
+          :chaos="0.1"
+          :border-radius="10"
+          :max-samples="360"
+        >
+          <pre ref="outBox" class="log-box mono">{{ selected?.output }}</pre>
+        </ElectricBorder>
       </section>
       <section class="card log-card">
         <header class="card-header">
@@ -144,7 +166,15 @@ onUnmounted(() => stopPolling())
             标准错误 <span class="hint mono">{{ selected?.errPath }}</span>
           </h2>
         </header>
-        <pre ref="errBox" class="log-box mono log-box-err">{{ selected?.error }}</pre>
+        <ElectricBorder
+          :active="Boolean(selected?.error)"
+          :color="fetching ? '#4f8cff' : '#e5484d'"
+          :chaos="0.1"
+          :border-radius="10"
+          :max-samples="360"
+        >
+          <pre ref="errBox" class="log-box mono log-box-err">{{ selected?.error }}</pre>
+        </ElectricBorder>
       </section>
     </div>
   </div>

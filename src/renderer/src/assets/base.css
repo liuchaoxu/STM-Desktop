@@ -31,16 +31,27 @@
   --color-text: var(--ev-c-text-1);
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  font-weight: normal;
-}
+/*
+ * The reset lives in the `base` layer, not unlayered. Unlayered rules outrank
+ * *every* cascade layer, so as long as this block sat outside one, `margin: 0` and
+ * `font-weight: normal` silently defeated every Tailwind `m-*` / `font-*` utility in
+ * the app — which is exactly how the header marquee ended up with its chips
+ * touching (`mr-[var(--logoloop-gap)]` was emitted, matched, and still lost here).
+ * Tailwind declares `@layer theme, base, components, utilities`, so a reset inside
+ * `base` is still applied but is now overridable, as intended.
+ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    font-weight: normal;
+  }
 
-ul {
-  list-style: none;
+  ul {
+    list-style: none;
+  }
 }
 
 body {

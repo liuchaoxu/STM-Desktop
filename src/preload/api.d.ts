@@ -1,5 +1,3 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
-
 declare global {
   /** A tunnel after merging defaults/group/tunnel values, plus live status. */
   interface TunnelView {
@@ -66,6 +64,8 @@ declare global {
     versions: { electron: string; node: string; chrome: string }
     sshPath: string | null
     plinkPath: string | null
+    /** Whether passwords can be kept in the OS credential store. */
+    secretsEncrypted: boolean
     configPath: string
     runtimeDir: string
   }
@@ -96,7 +96,6 @@ declare global {
   }
 
   interface Window {
-    electron: ElectronAPI
     api: {
       tunnel: TunnelApi
       config: ConfigApi
