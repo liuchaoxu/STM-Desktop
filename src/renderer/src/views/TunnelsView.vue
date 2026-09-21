@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useTunnelStore } from '../composables/useTunnelStore'
 import { useUi } from '../composables/ui'
 import BorderGlow from '../components/bits/BorderGlow.vue'
-import DepthText from '../components/bits/DepthText.vue'
+import Counter from '../components/bits/Counter.vue'
 import Dock from '../components/bits/Dock.vue'
 import ElectricBorder from '../components/bits/ElectricBorder.vue'
 import type { DockItemData } from '../components/bits/DockItem.vue'
@@ -44,18 +44,10 @@ const actionItems = computed<DockItemData[]>(() => [
   }
 ])
 
-/** Counters are rendered with the extruded DepthText face. */
-const depthProps = {
-  layers: 6,
-  depth: 0.9,
-  tilt: 4,
-  perspective: 320,
-  fontSize: '13px',
-  fontWeight: 600,
-  pointerTracking: false,
-  autoOrbit: false,
-  shadow: false
-} as const
+/**
+ * Counts roll with <Counter>, which sizes itself from the font it inherits — so a
+ * number always matches the chip (12px) or pill (11.5px) it sits in.
+ */
 
 const groups = computed(() => {
   const map = new Map<string, TunnelView[]>()
@@ -102,6 +94,46 @@ function onShowLogs(key: string): void {
   show('logs')
 }
 
+/**
+ * Where the row's 🌐 button points.
+ *
+ * Default: the tunnel's own local endpoint — `local_bind` as-is, except that a
+ * wildcard bind (`0.0.0.0`, `::`) is opened as 127.0.0.1 because that is what a
+ * browser on the same machine can reach — plus `local_port` and `web_path`.
+ * `web_url` overrides the whole thing for cases where the path/port cannot be
+ * derived (the OS still only ever receives http/https, see `url-policy`).
+ */
+function webUrl(t: TunnelView): string | null {
+  const values = t.values ?? {}
+  const override = (values.web_url ?? '').trim()
+  if (override) return override
+
+  const port = (values.local_port ?? '').trim()
+  if (!port) return null
+
+  const bind = (values.local_bind ?? '').trim()
+  const host = !bind || bind === '0.0.0.0' || bind === '::' ? '127.0.0.1' : bind
+
+  const raw = (values.web_path ?? '').trim()
+  const path = !raw || raw === '/' ? '/' : raw.startsWith('/') ? raw : `/${raw}`
+
+  return `http://${host}:${port}${path}`
+}
+
+/** Disabled buttons still explain themselves on hover. */
+function webTitle(t: TunnelView): string {
+  const url = webUrl(t)
+  if (!url) return '未设置本地端口，无法推断要打开的地址'
+  if (t.state !== 'running') return `隧道${stateLabel[t.state]}时才能打开 ${url}`
+  return `在浏览器中打开 ${url}`
+}
+
+function openWeb(t: TunnelView): void {
+  const url = webUrl(t)
+  // The shell's window-open handler validates the protocol and hands it to the OS.
+  if (url) window.open(url, '_blank')
+}
+
 const stateLabel: Record<TunnelView['state'], string> = {
   running: '运行中',
   connecting: '连接中',
@@ -120,30 +152,16 @@ onMounted(() => {
         <Dock :items="actionItems" />
       </div>
       <div class="toolbar-right">
-        <span class="meta-chip"
-          >共 <DepthText v-bind="depthProps" :text="String(summary.total)" /> 个隧道</span
-        >
+        <span class="meta-chip">共 <Counter :value="summary.total" /> 个隧道</span>
         <span class="meta-chip meta-green">
-          <DepthText
-            v-bind="depthProps"
-            :text="String(summary.running)"
-            face-color="var(--green)"
-            depth-color="color-mix(in srgb, var(--green) 45%, #000)"
-          />
+          <Counter :value="summary.running" />
           运行
         </span>
         <span class="meta-chip meta-amber">
-          <DepthText
-            v-bind="depthProps"
-            :text="String(summary.connecting)"
-            face-color="var(--amber)"
-            depth-color="color-mix(in srgb, var(--amber) 45%, #000)"
-          />
+          <Counter :value="summary.connecting" />
           连接中
         </span>
-        <span class="meta-chip"
-          >启用 <DepthText v-bind="depthProps" :text="String(summary.enabled)"
-        /></span>
+        <span class="meta-chip">启用 <Counter :value="summary.enabled" /></span>
       </div>
     </div>
 
@@ -187,7 +205,8 @@ onMounted(() => {
             <span v-if="groupServer(group.items)" class="group-server mono">{{
               groupServer(group.items)
             }}</span>
-            <span class="pill pill-muted">{{ group.items.length }} 个隧道</span>
+            <span class="pill pill-muted"><Counter :value="group.items.length" /> 个隧道</span>
+            >
           </div>
           <div class="group-actions">
             <button class="btn btn-sm" :disabled="busy" @click="execute('start', group.name)">
@@ -235,6 +254,15 @@ onMounted(() => {
               <span class="map-local">{{ t.local }}</span>
               <span class="map-arrow">→</span>
               <span class="map-remote">{{ t.remote }}</span>
+              <button
+                class="btn btn-icon map-open"
+                :disabled="t.state !== 'running' || !webUrl(t)"
+                :title="webTitle(t)"
+                aria-label="在浏览器中打开"
+                @click="openWeb(t)"
+              >
+                🌐
+              </button>
             </span>
             <span class="col-actions">
               <button

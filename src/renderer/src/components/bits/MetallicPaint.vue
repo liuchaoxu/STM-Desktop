@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * MetallicPaint �?ported from Vue Bits
+ * MetallicPaint — ported from Vue Bits
  * (<https://vue-bits.dev/components/metallic-paint>).
  *
  * A WebGL2 shader paints an image as liquid metal: the image is converted to a
@@ -15,8 +15,8 @@
  *    Fixed to a real `class`.
  * 2. **Resolution is bounded, and driven by the element.** Upstream hardcodes a
  *    1000×1000×dpr canvas and a `u_ratio` of `1`. The depth solver is
- *    O(iterations × pixels) �?at 1000² that is ~2×10�?inner-loop steps, i.e.
- *    seconds of blocking main thread on load �?and the fragment shader then
+ *    O(iterations × pixels) — at 1000² that is ~2×10⁸ inner-loop steps, i.e.
+ *    seconds of blocking main thread on load — and the fragment shader then
  *    shades a megapixel per frame. Here the canvas matches the element's box and
  *    the solver runs at `resolution` px (default 256), which is plenty for a
  *    wordmark; `u_ratio` is computed from the real canvas aspect instead of being
@@ -258,7 +258,7 @@ function toRgb(color: string): [number, number, number] {
 /**
  * Turn the image into a depth field (RGB) + shape mask (alpha).
  *
- * The solver is copied from upstream; only the sizing rule changed �?it caps the
+ * The solver is copied from upstream; only the sizing rule changed — it caps the
  * longest edge at `maxSize` and never upscales, because the iteration count is
  * paid per pixel.
  */

@@ -8,7 +8,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import AnimatedContent from '../components/bits/AnimatedContent.vue'
-import DepthText from '../components/bits/DepthText.vue'
+import Counter from '../components/bits/Counter.vue'
 import Dock from '../components/bits/Dock.vue'
 import type { DockItemData } from '../components/bits/DockItem.vue'
 import GroupEditorModal from '../components/config/GroupEditorModal.vue'
@@ -38,18 +38,10 @@ const actionItems = computed<DockItemData[]>(() => [
   { icon: '♻️', label: '恢复默认模板', tone: 'danger', onClick: resetConfig }
 ])
 
-/** Counters are rendered with the extruded DepthText face. */
-const depthProps = {
-  layers: 6,
-  depth: 0.9,
-  tilt: 4,
-  perspective: 320,
-  fontSize: '13px',
-  fontWeight: 600,
-  pointerTracking: false,
-  autoOrbit: false,
-  shadow: false
-} as const
+/**
+ * Counts roll with <Counter>, which sizes itself from the font it inherits, so a
+ * number matches the chip text around it.
+ */
 
 /** A group as shown on the overview: declared ones plus implicit ones. */
 interface GroupEntry {
@@ -484,16 +476,9 @@ onMounted(() => void load())
             @open="openDefaults"
           >
             <template #stats>
-              <span class="meta-chip">
-                共 <DepthText v-bind="depthProps" :text="String(cfg.tunnels.length)" /> 个隧道
-              </span>
+              <span class="meta-chip"> 共 <Counter :value="cfg.tunnels.length" /> 个隧道 </span>
               <span class="meta-chip meta-green">
-                <DepthText
-                  v-bind="depthProps"
-                  :text="String(runningTotal)"
-                  face-color="var(--green)"
-                  depth-color="color-mix(in srgb, var(--green) 45%, #000)"
-                />
+                <Counter :value="runningTotal" />
                 运行中
               </span>
             </template>
@@ -516,16 +501,9 @@ onMounted(() => void load())
             @open="openGroup(entry)"
           >
             <template #stats>
-              <span class="meta-chip">
-                <DepthText v-bind="depthProps" :text="String(entry.tunnels.length)" /> 个隧道
-              </span>
+              <span class="meta-chip"> <Counter :value="entry.tunnels.length" /> 个隧道 </span>
               <span class="meta-chip meta-green">
-                <DepthText
-                  v-bind="depthProps"
-                  :text="String(runningIn(entry))"
-                  face-color="var(--green)"
-                  depth-color="color-mix(in srgb, var(--green) 45%, #000)"
-                />
+                <Counter :value="runningIn(entry)" />
                 运行中
               </span>
             </template>

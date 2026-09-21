@@ -14,6 +14,28 @@ const HOST_KEY_CHECKING: OptionField['options'] = [
   { value: 'no', label: 'no（不安全）' }
 ]
 
+/**
+ * Where the tunnel row's "在浏览器中打开" button points. Without these, the button
+ * uses `http://<本地绑定地址>:<本地端口>/`; `web_path` appends a path and
+ * `web_url` replaces the whole address (any http/https URL).
+ */
+const WEB_FIELDS: OptionField[] = [
+  {
+    key: 'web_path',
+    label: '浏览器打开路径',
+    wide: true,
+    placeholder: '/（留空即打开根路径）',
+    hint: '拼在本地地址后面，例如 /admin 或 /#/dashboard'
+  },
+  {
+    key: 'web_url',
+    label: '浏览器打开地址',
+    wide: true,
+    placeholder: 'http://127.0.0.1:6379/',
+    hint: '填了就整体覆盖上面的本地地址与路径，仅支持 http/https'
+  }
+]
+
 export const DEFAULT_FIELDS: OptionField[] = [
   { key: 'client', label: 'SSH 客户端', placeholder: 'auto', list: 'client-options' },
   { key: 'server_port', label: 'SSH 端口', kind: 'number', placeholder: '22' },
@@ -24,7 +46,8 @@ export const DEFAULT_FIELDS: OptionField[] = [
     label: '主机密钥校验',
     kind: 'select',
     options: HOST_KEY_CHECKING
-  }
+  },
+  ...WEB_FIELDS
 ]
 
 export const GROUP_FIELDS: OptionField[] = [
@@ -47,7 +70,8 @@ export const GROUP_FIELDS: OptionField[] = [
     kind: 'select',
     options: HOST_KEY_CHECKING
   },
-  { key: 'remote_host', label: '远端主机', placeholder: '127.0.0.1' }
+  { key: 'remote_host', label: '远端主机', placeholder: '127.0.0.1' },
+  ...WEB_FIELDS
 ]
 
 export const TUNNEL_FIELDS: OptionField[] = [
@@ -71,5 +95,6 @@ export const TUNNEL_FIELDS: OptionField[] = [
     label: '主机密钥校验',
     kind: 'select',
     options: HOST_KEY_CHECKING
-  }
+  },
+  ...WEB_FIELDS
 ]

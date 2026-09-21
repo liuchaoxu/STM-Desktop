@@ -83,6 +83,9 @@ Windows 安装包为 **NSIS 向导式安装**（`dist/stm-desktop-1.0.0-setup.ex
 - **分组卡片**：每组显示 `服务器@用户名`、隧道数量，以及 启动组 / 停止组 / 重启组
 - **隧道行**：状态点（绿=运行中、黄=连接中、灰=已停止）、PID、`本地地址 → 远端地址`，以及 启动 / 停止 / 重启 / 日志 按钮
   - 状态为“连接中”表示进程已拉起但本地端口尚未打开（SSH 握手 / 主机密钥确认中）
+  - 地址右边的 **🌐** 按钮在浏览器里打开这条隧道**自己的本地地址**（`local_bind` 是 `0.0.0.0` 这类通配绑定时按 `127.0.0.1` 打开）。默认打开 `http://<本地地址>:<本地端口>/`，可以用隧道 / 组 / 默认设置里的 `web_path` 追加路径，或用 `web_url` 整条覆盖；**只有运行中可用**，鼠标悬停会显示将要打开的地址（停用时说明原因）
+- 表格的表头与每一行共用同一组列宽，因此 状态 / 隧道 / PID / 本地 → 远端 / 操作 始终对齐
+- 工具栏里的计数（共 N 个隧道 / 运行 / 连接中 / 启用，以及组卡片上的数量）是**滚动计数器**：数字变化时会像里程表一样滚到新值，字号、颜色与字重都跟随所在的文字，不会比旁边那行字更大或更亮
 
 ### 配置页
 
@@ -163,6 +166,8 @@ remote_port=3306
 | `hostkey` | — | SHA256 主机指纹（仅 Plink） |
 | `strict_host_key_checking` | `yes` | 仅 OpenSSH：`yes` / `accept-new` / `no`（`no` 不安全） |
 | `enabled` | `true` | 为 `false` 时批量启动跳过，但可单独启动/停止/查看日志 |
+| `web_path` | `/` | 隧道行 🌐 按钮在本地地址后追加的路径，例如 `/admin`、`/#/dashboard` |
+| `web_url` | — | 隧道行 🌐 按钮要打开的完整地址（http/https）；填了就整体覆盖本地地址与 `web_path` |
 
 ## 实现原理
 
@@ -205,7 +210,9 @@ npm run smoke
 
 该脚本还会对**动效本身**取证，前提是窗口可见：它先 `show() + setAlwaysOnTop(true) + focus()` 并打印 `WINDOW {visible,minimized,focused,visibility}`。这一步不可省略 —— Windows 的遮挡检测会把被其他窗口盖住的窗口判为 `hidden`，Chromium 随之节流 `requestAnimationFrame`，于是跑马灯位移、Dock 放大、背景动画全部会量出"没生效"的假象。窗口可见后，脚本读取跑马灯轨道 0.9 秒前后的 `transform`（应位移约 23–24px，对应 26 px/s）、指针移上 Dock 条目前后的 `clientHeight`（26 → 36，同时打印指针下真正命中的元素），以及同页两帧的像素差（`changedPct` 约 26–32%）。
 
-界面动效的取证还包括：跑马灯同屏是否重复（`maxVisibleRepeat`，应为 1）、间距是否真的生效（`gap`，并额外用一个离屏探针元素验证那条工具类本身有没有被 CSS 层序吃掉）、毛玻璃是否生效（`backdropFilter`，前缀与标准写法都读）、以及每个界面上电气边框的宿主数量与画布上**实际描边的墨迹像素数**（`ink`）。隧道行的电气边框需要"运行中 / 连接中"才点亮，而启动真实隧道会真的去连用户的服务器，所以脚本改为伪造应用自己的 connecting 判据：往运行时目录写一个 `pid` 指向探针自身、端口从未监听的状态文件，等 2 秒轮询算出状态后取证，随后立刻删除该文件（截图 `out/shots/11-row-electric-border.png`）。
+界面动效的取证还包括：跑马灯同屏是否重复（`maxVisibleRepeat`，应为 1）、间距是否真的生效（`gap`，并额外用一个离屏探针元素验证那条工具类本身有没有被 CSS 层序吃掉）、毛玻璃是否生效（`backdropFilter`，前缀与标准写法都读）、每个界面上电气边框的宿主数量与画布上**实际描边的墨迹像素数**（`ink`）、**表格列对齐**（`align.deltas`：表头行与每个数据行同一单元格的左边缘差，应全为 0）、**每行的 🌐 打开按钮**（`webButtons` 的禁用态与 tooltip 里的地址，必须与 `runningRows` 一致），以及**计数器滚动**（`COUNTER ROLL`：数字轮偏离窗口中心的 `lift` > 1，说明确实在滚而不是瞬间跳值）。
+
+隧道行的电气边框需要“运行中 / 连接中”才点亮，而启动真实隧道会真的去连用户的服务器，所以脚本改为伪造应用自己的状态判据：往运行时目录写一个 `pid` 指向探针自身、端口从未监听的状态文件，等 2 秒轮询算出状态后取证（此时行边框点亮、计数从 0 滚到 1），随后立刻删除该文件（截图 `out/shots/11-row-electric-border.png`）。
 
 端到端 IPC 检查（可选，需先 `npm run build`）：
 
@@ -243,7 +250,7 @@ STM Desktop/
 │        ├─ App.vue             # 布局：头部/页签/视图切换
 │        ├─ views/              # TunnelsView / ConfigView / LogsView
 │        ├─ components/         # KeyValueEditor / ToastHost
-│        │  ├─ bits/            # 动效与背景件：SpecularButton / Dock(+DockItem) / MetallicPaint / Silk / BorderGlow / DepthText / LogoLoop / ElectricBorder / AnimatedContent / RevealPanel
+│        │  ├─ bits/            # 动效与背景件：SpecularButton / Dock(+DockItem) / MetallicPaint / Silk / BorderGlow / LogoLoop / ElectricBorder / Counter(+CounterDigit) / AnimatedContent / RevealPanel
 │        │  │                    # 未使用（保留备查）：GooeyNav / SpotlightCard / ShinyText / CountUp
 │        │  └─ config/          # 配置页卡片：SummaryCard / TunnelCard / OptionsEditor / GroupEditorModal
 │        ├─ composables/        # 状态轮询、Toast、页签共享状态

@@ -312,6 +312,58 @@ app.whenReady().then(async () => {
            }
          })
 
+         // Rolling counters: which digit each column currently shows (the face with
+         // the smallest offset is the one in the window), plus a typography check —
+         // a plain span with the same text is inserted into the same chip so the
+         // counter's box can be compared against real text metrics.
+         const readCounter = (el) => {
+           const columns = [...el.querySelectorAll('.counter-digit')]
+           return {
+             label: el.getAttribute('aria-label'),
+             target: el.getAttribute('data-value'),
+             columns: columns.length,
+             transforms: [...(columns[0]?.querySelectorAll('[data-digit]') ?? [])]
+               .slice(0, 3)
+               .map((face) => String(face.style.transform || 'none')),
+             shown: columns
+               .map((col) => {
+                 let best = null
+                 ;[...col.querySelectorAll('[data-digit]')].forEach((face, i) => {
+                   const raw = String(face.style.transform || '')
+                   // "translateY(-12.5px)" -> -12.5, without a regex.
+                   const y = Math.abs(Number(raw.slice(11, -3)) || 0)
+                   if (!best || y < best.y) best = { digit: String(i), y }
+                 })
+                 return best ? best.digit : null
+               })
+               .join('')
+           }
+         }
+         const counters = [...document.querySelectorAll('.counter')].map(readCounter)
+         const counterFit = (() => {
+           const chip = [...document.querySelectorAll('.meta-chip')].find((el) =>
+             el.querySelector('.counter')
+           )
+           const counter = chip ? chip.querySelector('.counter') : null
+           if (!chip || !counter) return null
+           // The reference is plain text in the same chip. Its rect is the font's
+           // content box while the counter's is a full line box, so the meaningful
+           // number is the vertical *centre* delta.
+           const reference = document.createElement('span')
+           reference.textContent = '0'
+           chip.appendChild(reference)
+           const c = counter.getBoundingClientRect()
+           const r = reference.getBoundingClientRect()
+           reference.remove()
+           return {
+             counter: [Math.round(c.top), Math.round(c.height)],
+             text: [Math.round(r.top), Math.round(r.height)],
+             dCenter: Math.round((c.top + c.height / 2 - (r.top + r.height / 2)) * 10) / 10,
+             dFontSize:
+               getComputedStyle(counter).fontSize === getComputedStyle(reference).fontSize
+           }
+         })()
+
          // The action row is a Dock; its items carry the labels (pill variant).
          const dockPanel = document.querySelector('.dock-panel')
          const dock = {
@@ -375,6 +427,8 @@ app.whenReady().then(async () => {
            nav,
            brand,
            loop,
+           counters,
+           counterFit,
            headerScrollers,
            dock,
            sticky,
@@ -423,6 +477,62 @@ app.whenReady().then(async () => {
         const rowHosts = [...document.querySelectorAll('.tunnel-row.electric-border')]
         const logHosts = [...document.querySelectorAll('.log-card .electric-border')]
         const liveCanvas = document.querySelector('.electric-border.is-active canvas')
+        // Column alignment: every row is its own grid, so the header and the data
+        // rows have to resolve identical tracks. Grid items are collected through
+        // display:contents wrappers (ElectricBorder); absolute layers are skipped.
+        // No backticks anywhere in this function: it is all inside a template literal.
+        const gridItems = (row) => {
+          const items = []
+          const walk = (nodes) => {
+            ;[...nodes].forEach((node) => {
+              const style = getComputedStyle(node)
+              if (style.display === 'contents') walk(node.children)
+              else if (style.position !== 'absolute') items.push(node)
+            })
+          }
+          walk(row.children)
+          return items
+        }
+        const rowList = [...document.querySelectorAll('.tunnel-row')]
+        const rows = rowList.slice(0, 3).map((row) => ({
+          cls: String(row.className),
+          cols: getComputedStyle(row).gridTemplateColumns,
+          cells: gridItems(row).map((cell) => {
+            const rect = cell.getBoundingClientRect()
+            return (
+              String(cell.className || cell.tagName).split(' ')[0] +
+              '@' +
+              Math.round(rect.left) +
+              '+' +
+              Math.round(rect.width)
+            )
+          })
+        }))
+        const cellLefts = (row) => gridItems(row).map((cell) => Math.round(cell.getBoundingClientRect().left))
+        const headerLefts = rowList.length ? cellLefts(rowList[0]) : []
+        const alignDeltas = rowList.slice(1).map((row) => {
+          const own = cellLefts(row)
+          return headerLefts.map((value, index) =>
+            own[index] === undefined ? null : own[index] - value
+          )
+        })
+        const align = {
+          header: headerLefts,
+          deltas: alignDeltas,
+          aligned: alignDeltas.every((deltas) =>
+            deltas.every((value) => value !== null && Math.abs(value) <= 1)
+          )
+        }
+
+        // The per-row "open the local endpoint in the browser" button: enabled
+        // exactly for running tunnels, and its tooltip carries the resolved URL.
+        const webButtons = [...document.querySelectorAll('.map-open')].map((button) => ({
+          disabled: button.disabled,
+          title: button.getAttribute('title')
+        }))
+        const runningRows = rowList.filter((row) =>
+          [...row.querySelectorAll('.pill')].some((pill) => pill.textContent.trim() === '运行中')
+        ).length
         return {
           tab: tabs.findIndex((t) => t.getAttribute('aria-current') === 'page'),
           backdrop: backdrop ? getComputedStyle(backdrop).display : 'missing',
@@ -431,6 +541,10 @@ app.whenReady().then(async () => {
           modal: document.querySelectorAll('.modal-wide').length,
           rowBorders: rowHosts.length,
           rowBordersActive: rowHosts.filter((el) => el.classList.contains('is-active')).length,
+          rows,
+          align,
+          webButtons,
+          runningRows,
           logBorders: logHosts.length,
           logBordersActive: logHosts.filter((el) => el.classList.contains('is-active')).length,
           borderCanvas: liveCanvas
@@ -603,13 +717,73 @@ app.whenReady().then(async () => {
           executable: 'ssh'
         })
       )
-      await goTo(clickTab('隧道'), 2800) // the tunnel store refreshes every 2s
+      // Reads every counter: which digit each wheel currently shows, and how far the
+      // nearest face is from the centre of its window (a wheel at rest has a face
+      // exactly at 0).
+      const readAll = () =>
+        win.webContents.executeJavaScript(`(() =>
+          [...document.querySelectorAll('.counter')].map((el) => {
+            let maxLift = 0
+            const shown = [...el.querySelectorAll('.counter-digit')]
+              .map((col) => {
+                let best = null
+                ;[...col.querySelectorAll('[data-digit]')].forEach((face) => {
+                  const raw = String(face.style.transform || '')
+                  const y = Math.abs(Number(raw.slice(11, -3)) || 0)
+                  if (!best || y < best.y) best = { y, digit: face.textContent }
+                })
+                if (best && best.y > maxLift) maxLift = best.y
+                return best ? best.digit : '?'
+              })
+              .join('')
+            return {
+              target: el.getAttribute('data-value'),
+              shown,
+              lift: Math.round(maxLift * 10) / 10
+            }
+          })
+        )()`)
+
+      // The tunnel rows (and the toolbar counts that go with them) live on the 隧道
+      // page; the state poll runs every 2 s, so the tab switch is just a head start.
+      await goTo(clickTab('隧道'), 250)
+
+      // Sample *while* the 2 s status poll picks the fabricated state up: the roll
+      // lasts well under a second, so a window opened after the poll settles would
+      // only ever see finished wheels.
+      const frames = []
+      const startedAt = Date.now()
+      while (Date.now() - startedAt < 3600) {
+        frames.push(await readAll())
+        await wait(90)
+      }
+
       const fabricated = await state()
       console.log(
         'ROW BORDER ' +
           JSON.stringify({ key: runtime.first.key, was: runtime.first.state, ...fabricated })
       )
       await shot(win, '11-row-electric-border')
+
+      // A wheel caught mid-roll shows the incoming digit at a non-zero offset (the
+      // outgoing one is on its way out) — that is `lift`; a value that simply jumped
+      // would keep lift at 0 in every frame.
+      const perCounter = frames[0].map((_, index) => ({
+        from: frames[0][index].shown,
+        to: frames[frames.length - 1][index].target,
+        sequence: [...new Set(frames.map((frame) => frame[index].shown))].join('|'),
+        maxLift: Math.max(...frames.map((frame) => frame[index].lift))
+      }))
+      console.log(
+        'COUNTER ROLL ' +
+          JSON.stringify({
+            frames: frames.length,
+            changed: perCounter.filter((entry) => entry.from !== entry.to).length,
+            rolled: perCounter.filter((entry) => entry.maxLift > 1).length,
+            perCounter
+          })
+      )
+
       // Restore: this fabricated pid dies with the probe, and the app drops a
       // stale state file on its next refresh anyway.
       if (backup) fs.writeFileSync(stateFile, backup)

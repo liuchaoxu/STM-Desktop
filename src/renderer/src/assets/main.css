@@ -467,7 +467,14 @@ body {
 
 .tunnel-row {
   display: grid;
-  grid-template-columns: 110px minmax(140px, 1.2fr) 80px minmax(230px, 1.6fr) auto;
+  /*
+   * The last track is a fixed width on purpose. Every row is its own grid, and an
+   * `auto` track is content-sized: a data row (four action buttons, 194px) used to
+   * leave the two `fr` tracks less room than the header row (whose 操作 cell is
+   * 23px), so 隧道 / PID / 本地 → 远端 drifted out of line with the header. Fixing
+   * the track makes every row resolve the same columns, whatever is inside it.
+   */
+  grid-template-columns: 110px minmax(140px, 1.2fr) 80px minmax(230px, 1.6fr) 216px;
   align-items: center;
   gap: 10px;
   padding: 7px 16px;
@@ -547,6 +554,24 @@ body {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  /* The track is fixed, so wrap instead of overflowing if a label grows. */
+  flex-wrap: wrap;
+}
+
+/* "Open the local endpoint in the browser", sitting next to the address it opens. */
+.map-open {
+  flex: none;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+.map-open:not(:disabled) {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.map-open:not(:disabled):hover {
+  background: var(--accent-soft);
 }
 
 /* ---------------------------------------------------------------- validate */
