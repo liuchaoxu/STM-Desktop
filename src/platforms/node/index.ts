@@ -38,5 +38,6 @@ export function createTunnelManager(opts: NodeTunnelManagerOptions): TunnelManag
 }
 
 export { ExecTransport, FileConfigStore }
+export { parseTasklistCsv } from './exec-transport'
 export type { BuiltCommand, ClientKind, ExecTransportOptions } from './exec-transport'
 export { tailFile } from './tail-file'

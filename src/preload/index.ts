@@ -1,39 +1,61 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import {
+  CHANNELS,
+  TUNNEL_CHANGED,
+  type IpcArgs,
+  type IpcChannel,
+  type IpcResult,
+  type StmApi,
+  type TunnelView
+} from '../shared/contract'
 
 /**
- * The renderer's entire surface, typed in `api.d.ts`.
- *
- * This script must stay dependency-free: it runs sandboxed, where `require()`
- * can only resolve Electron's own modules. A third-party import here (such as
- * `@electron-toolkit/preload`, which used to expose an unused `window.electron`)
- * fails to resolve and silently takes the whole bridge down with it.
+ * One typed hop to main. The channel name, its arguments and its result all come
+ * from the shared contract, so the bridge cannot drift from the handlers: both are
+ * generic over the same `IpcContract` map.
  */
-const api = {
+function invoke<K extends IpcChannel>(channel: K, ...args: IpcArgs<K>): Promise<IpcResult<K>> {
+  return ipcRenderer.invoke(channel, ...args)
+}
+
+/**
+ * The renderer's entire surface, typed in `src/shared/contract.ts`.
+ *
+ * This script must stay dependency-free: it runs sandboxed, where `require()` can
+ * only resolve Electron's own modules. A third-party import here (such as
+ * `@electron-toolkit/preload`, which used to expose an unused `window.electron`)
+ * fails to resolve and silently takes the whole bridge down with it. Importing our
+ * own bundled modules is fine — electron-vite inlines them.
+ */
+const api: StmApi = {
   tunnel: {
-    list: (): Promise<TunnelView[]> => ipcRenderer.invoke('tunnel:list'),
-    start: (target: string): Promise<ActionResult> => ipcRenderer.invoke('tunnel:start', target),
-    stop: (target: string): Promise<ActionResult> => ipcRenderer.invoke('tunnel:stop', target),
-    restart: (target: string): Promise<ActionResult> =>
-      ipcRenderer.invoke('tunnel:restart', target),
-    validate: (target: string): Promise<ValidateItem[]> =>
-      ipcRenderer.invoke('tunnel:validate', target),
-    logs: (target: string, lines?: number): Promise<LogPayload[]> =>
-      ipcRenderer.invoke('tunnel:logs', target, lines ?? 200)
+    list: () => invoke(CHANNELS.tunnelList),
+    start: (target) => invoke(CHANNELS.tunnelStart, target),
+    stop: (target) => invoke(CHANNELS.tunnelStop, target),
+    restart: (target) => invoke(CHANNELS.tunnelRestart, target),
+    validate: (target) => invoke(CHANNELS.tunnelValidate, target),
+    logs: (target, lines = 200) => invoke(CHANNELS.tunnelLogs, target, lines),
+    onChanged: (handler) => {
+      const listener = (_event: IpcRendererEvent, tunnels: TunnelView[]): void => handler(tunnels)
+      ipcRenderer.on(TUNNEL_CHANGED, listener)
+      return () => {
+        ipcRenderer.removeListener(TUNNEL_CHANGED, listener)
+      }
+    }
   },
   config: {
-    get: (): Promise<ConfigData> => ipcRenderer.invoke('config:get'),
-    save: (cfg: ConfigData): Promise<ConfigData> => ipcRenderer.invoke('config:save', cfg),
-    reload: (): Promise<ConfigData> => ipcRenderer.invoke('config:reload'),
-    getPath: (): Promise<{ path: string }> => ipcRenderer.invoke('config:path:get'),
-    setPath: (path: string): Promise<ConfigData> => ipcRenderer.invoke('config:path:set', path),
-    open: (): Promise<{ path: string; config: ConfigData } | null> =>
-      ipcRenderer.invoke('config:open'),
-    saveAs: (): Promise<{ path: string } | null> => ipcRenderer.invoke('config:save-as'),
-    reveal: (): Promise<{ path: string }> => ipcRenderer.invoke('config:reveal'),
-    reset: (): Promise<ConfigData> => ipcRenderer.invoke('config:reset')
+    get: () => invoke(CHANNELS.configGet),
+    save: (cfg) => invoke(CHANNELS.configSave, cfg),
+    reload: () => invoke(CHANNELS.configReload),
+    getPath: () => invoke(CHANNELS.configPathGet),
+    setPath: (path) => invoke(CHANNELS.configPathSet, path),
+    open: () => invoke(CHANNELS.configOpen),
+    saveAs: () => invoke(CHANNELS.configSaveAs),
+    reveal: () => invoke(CHANNELS.configReveal),
+    reset: () => invoke(CHANNELS.configReset)
   },
   app: {
-    info: (): Promise<AppInfo> => ipcRenderer.invoke('app:info')
+    info: () => invoke(CHANNELS.appInfo)
   }
 }
 

@@ -354,13 +354,17 @@ app.whenReady().then(async () => {
            chip.appendChild(reference)
            const c = counter.getBoundingClientRect()
            const r = reference.getBoundingClientRect()
+           // Read the styles before detaching the reference: a detached node has no
+           // inherited font size, which made this comparison always report false.
+           const counterFont = getComputedStyle(counter).fontSize
+           const referenceFont = getComputedStyle(reference).fontSize
            reference.remove()
            return {
              counter: [Math.round(c.top), Math.round(c.height)],
              text: [Math.round(r.top), Math.round(r.height)],
              dCenter: Math.round((c.top + c.height / 2 - (r.top + r.height / 2)) * 10) / 10,
-             dFontSize:
-               getComputedStyle(counter).fontSize === getComputedStyle(reference).fontSize
+             font: counterFont,
+             dFontSize: counterFont === referenceFont
            }
          })()
 
@@ -448,6 +452,25 @@ app.whenReady().then(async () => {
     )
 
     console.log('IPC CHECK OK ' + JSON.stringify({ ...result, ui }))
+
+    // The shell owns the status loop now (src/main/status.ts) and pushes it to the
+    // renderer, which only keeps a slow safety-net poll. Count the pushes while the
+    // fabricated state below is picked up: that count is the difference between "the
+    // UI updated by itself" and "the UI polled".
+    const apiSurface = await win.webContents.executeJavaScript(`(() => {
+      const names = (obj) => Object.keys(obj).sort()
+      window.__pushes = 0
+      window.__stopPush = window.api.tunnel.onChanged(() => {
+        window.__pushes += 1
+      })
+      return {
+        tunnel: names(window.api.tunnel),
+        config: names(window.api.config),
+        app: names(window.api.app),
+        onChangedIsFunction: typeof window.api.tunnel.onChanged === 'function'
+      }
+    })()`)
+    console.log('API SURFACE ' + JSON.stringify(apiSurface))
 
     // Screenshot tour: lets a reviewer actually look at the result instead of
     // trusting a structural assertion.
@@ -759,9 +782,15 @@ app.whenReady().then(async () => {
       }
 
       const fabricated = await state()
+      const pushes = await win.webContents.executeJavaScript(`window.__pushes`)
       console.log(
         'ROW BORDER ' +
-          JSON.stringify({ key: runtime.first.key, was: runtime.first.state, ...fabricated })
+          JSON.stringify({
+            key: runtime.first.key,
+            was: runtime.first.state,
+            pushes,
+            ...fabricated
+          })
       )
       await shot(win, '11-row-electric-border')
 

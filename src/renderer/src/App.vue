@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ToastHost from './components/ToastHost.vue'
 import AuthorLinks from './components/AuthorLinks.vue'
 import LogoLoop from './components/bits/LogoLoop.vue'
@@ -14,7 +14,7 @@ import LogsView from './views/LogsView.vue'
 import { useTunnelStore } from './composables/useTunnelStore'
 import { useUi } from './composables/ui'
 
-const { busy, busyLabel, refresh, startPolling } = useTunnelStore()
+const { busy, busyLabel, refresh, startLiveUpdates, stopLiveUpdates } = useTunnelStore()
 const { activeTab } = useUi()
 
 const info = ref<AppInfo | null>(null)
@@ -111,11 +111,16 @@ const showBackdrop = computed(() => activeTab.value !== 'logs')
 
 onMounted(() => {
   void refresh()
-  startPolling(2000)
+  // The shell owns the refresh loop and pushes changes; this only subscribes.
+  startLiveUpdates()
   window.api.app
     .info()
     .then((i) => (info.value = i))
     .catch(() => undefined)
+})
+
+onUnmounted(() => {
+  stopLiveUpdates()
 })
 </script>
 

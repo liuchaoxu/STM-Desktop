@@ -76,11 +76,44 @@ interface ClientInfo {
 /** Rotate a tunnel log once it grows past this size (one previous file kept). */
 const LOG_MAX_BYTES = 5 * 1024 * 1024
 
+/**
+ * How long a Windows process snapshot stays valid.
+ *
+ * Shorter than any status interval, long enough that one refresh with N tunnels
+ * costs one process spawn instead of N.
+ */
+const IMAGE_TTL_MS = 900
+
 /** How long to wait for a started client to open its local port. */
 const READY_ATTEMPTS = 30
 const READY_INTERVAL_MS = 200
 const EXIT_ATTEMPTS = 30
 const EXIT_INTERVAL_MS = 100
+
+/**
+ * `tasklist /FO CSV /NH` → pid → image name.
+ *
+ * Exported because the format handling (quoted names, commas inside them, CRLF) is
+ * worth pinning in the smoke test. A line that does not parse is skipped rather than
+ * guessed at: a wrong image name would look like a recycled pid and the tunnel would
+ * be reported dead.
+ */
+export function parseTasklistCsv(text: string): Map<number, string> {
+  const byPid = new Map<number, string>()
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('"')) continue
+    let fields: string[]
+    try {
+      fields = JSON.parse(`[${line}]`) as string[]
+    } catch {
+      continue
+    }
+    const image = fields[0]
+    const pid = Number(fields[1])
+    if (image && Number.isInteger(pid) && pid > 0) byPid.set(pid, image)
+  }
+  return byPid
+}
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -125,6 +158,8 @@ export class ExecTransport implements TunnelTransport {
   private readonly children = new Map<number, ChildProcess>()
   /** Children we spawned that already reported 'exit' (see `probeAlive`). */
   private readonly exited = new Set<number>()
+  /** Windows process listing, reused across a status refresh (see `tasklistImages`). */
+  private images: { at: number; byPid: Map<number, string> } | null = null
   private sweptPasswordFiles = false
 
   constructor(opts: ExecTransportOptions) {
@@ -216,7 +251,8 @@ export class ExecTransport implements TunnelTransport {
       client: kind,
       startedAt: Date.now(),
       executable: path.resolve(exe),
-      identity: await this.currentIdentity(child.pid)
+      // `fresh`: the cached snapshot predates this child, so it cannot know its name.
+      identity: await this.currentIdentity(child.pid, true)
     }
     const tmp = `${stateFile}.tmp`
     await fs.writeFile(tmp, JSON.stringify(data), 'utf-8')
@@ -346,29 +382,49 @@ export class ExecTransport implements TunnelTransport {
   }
 
   /** Windows: image name via tasklist; POSIX: /proc/<pid>/stat starttime. */
-  private async currentIdentity(pid: number): Promise<string | undefined> {
-    try {
-      if (process.platform === 'win32') {
-        const stdout = await new Promise<string>((resolve, reject) => {
-          execFile(
-            'tasklist',
-            ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
-            { timeout: 3000, windowsHide: true },
-            (err, out) => (err ? reject(err) : resolve(out))
-          )
-        })
-        const first = stdout.split(/\r?\n/)[0]
-        if (!first || !first.startsWith('"')) return undefined
-        try {
-          return (JSON.parse(`[${first}]`) as string[])[0]
-        } catch {
-          return undefined
-        }
+  private async currentIdentity(pid: number, fresh = false): Promise<string | undefined> {
+    if (process.platform !== 'win32') {
+      try {
+        const stat = await fs.readFile(`/proc/${pid}/stat`, 'ascii')
+        return stat.split(' ')[21]
+      } catch {
+        return undefined
       }
-      const stat = await fs.readFile(`/proc/${pid}/stat`, 'ascii')
-      return stat.split(' ')[21]
+    }
+    // Used right after spawning, where the cached snapshot cannot contain the child.
+    if (fresh) this.images = null
+    const images = await this.tasklistImages()
+    return images?.get(pid)
+  }
+
+  /**
+   * One `tasklist` call for every liveness check in the same window.
+   *
+   * A filtered `tasklist /FI "PID eq N"` per tunnel meant one process spawn per
+   * tunnel per status refresh — the most expensive thing the app did while idle. The
+   * unfiltered listing returns every pid for the same or less wall time and is reused
+   * for `IMAGE_TTL_MS`.
+   */
+  private async tasklistImages(): Promise<Map<number, string> | null> {
+    if (process.platform !== 'win32') return null
+    const now = Date.now()
+    if (this.images && now - this.images.at < IMAGE_TTL_MS) return this.images.byPid
+    try {
+      const stdout = await new Promise<string>((resolve, reject) => {
+        execFile(
+          'tasklist',
+          ['/FO', 'CSV', '/NH'],
+          { timeout: 5000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+          (err, out) => (err ? reject(err) : resolve(out))
+        )
+      })
+      const byPid = parseTasklistCsv(stdout)
+      this.images = { at: now, byPid }
+      return byPid
     } catch {
-      return undefined
+      // A failure must never be cached as "no processes exist": that would report
+      // every tunnel as dead. Keep the previous snapshot, or none.
+      return null
     }
   }
 
@@ -383,12 +439,16 @@ export class ExecTransport implements TunnelTransport {
       return false
     }
     if (data.identity) {
-      try {
-        const now = await this.currentIdentity(pid)
-        if (now && now !== data.identity) return false // PID was reused
-      } catch {
-        /* fall back to existence check */
+      if (process.platform === 'win32') {
+        const images = await this.tasklistImages()
+        // Snapshot unavailable: fall back to the existence check above.
+        if (!images) return true
+        const image = images.get(pid)
+        // Absent means the process is gone; a different name means a recycled pid.
+        return image !== undefined && image === data.identity
       }
+      const now = await this.currentIdentity(pid)
+      if (now && now !== data.identity) return false // PID was reused
     }
     return true
   }

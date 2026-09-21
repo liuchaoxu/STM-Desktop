@@ -6,6 +6,9 @@
  * This file is the desktop-specific wiring only: it builds the Node platform
  * (file-backed config + external ssh/plink transport) and exposes the shared
  * `TunnelManager` over IPC.
+ *
+ * Channel names and their argument/result types come from `src/shared/contract.ts`,
+ * so the shell and the preload bridge cannot disagree about either.
  */
 import { app, dialog, ipcMain, shell } from 'electron'
 import { promises as fs } from 'fs'
@@ -14,8 +17,21 @@ import * as path from 'path'
 import type { TunnelManager } from '../core/manager'
 import { defaultConfig } from '../core/config'
 import { createTunnelManager, FileConfigStore } from '../platforms/node'
+import { CHANNELS, type IpcArgs, type IpcChannel, type IpcResult } from '../shared/contract'
 import { assertConfigPayload, assertTarget } from './ipc-guard'
 import { ElectronSecretStore } from './secret-store'
+import type { StatusBroadcaster } from './status'
+
+/**
+ * `ipcMain.handle` with the contract's argument and result types attached: the
+ * handler signature is checked against the channel it is registered for.
+ */
+function handle<K extends IpcChannel>(
+  channel: K,
+  handler: (...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>
+): void {
+  ipcMain.handle(channel, (_event, ...args: unknown[]) => handler(...(args as IpcArgs<K>)))
+}
 
 interface Settings {
   configPath?: string
@@ -91,7 +107,13 @@ export function createManager(): TunnelManager {
   })
 }
 
-export async function registerIpc(manager: TunnelManager): Promise<void> {
+export async function registerIpc(
+  manager: TunnelManager,
+  status: StatusBroadcaster
+): Promise<void> {
+  /** Mutations push the new projection instead of waiting for the next tick. */
+  const announce = (): void => void status.push(true)
+
   // The default config location is always switchable.
   authorizeConfigPath(manager.getConfigPath())
 
@@ -109,30 +131,40 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
     await manager.ensureConfigFile()
   }
 
-  ipcMain.handle('tunnel:list', () => manager.list())
-  ipcMain.handle('tunnel:start', (_event, target: unknown) =>
-    manager.run('start', assertTarget(target))
-  )
-  ipcMain.handle('tunnel:stop', (_event, target: unknown) =>
-    manager.run('stop', assertTarget(target))
-  )
-  ipcMain.handle('tunnel:restart', (_event, target: unknown) =>
-    manager.run('restart', assertTarget(target))
-  )
-  ipcMain.handle('tunnel:validate', (_event, target: unknown) =>
-    manager.validate(assertTarget(target))
-  )
-  ipcMain.handle('tunnel:logs', (_event, target: unknown, lines?: unknown) =>
+  handle(CHANNELS.tunnelList, () => manager.list())
+  handle(CHANNELS.tunnelStart, async (target) => {
+    const result = await manager.run('start', assertTarget(target))
+    announce()
+    return result
+  })
+  handle(CHANNELS.tunnelStop, async (target) => {
+    const result = await manager.run('stop', assertTarget(target))
+    announce()
+    return result
+  })
+  handle(CHANNELS.tunnelRestart, async (target) => {
+    const result = await manager.run('restart', assertTarget(target))
+    announce()
+    return result
+  })
+  handle(CHANNELS.tunnelValidate, (target) => manager.validate(assertTarget(target)))
+  handle(CHANNELS.tunnelLogs, (target, lines) =>
     manager.logs(assertTarget(target), clampLines(lines))
   )
 
-  ipcMain.handle('config:get', () => manager.getConfig())
-  ipcMain.handle('config:save', (_event, cfg: unknown) =>
-    manager.saveConfig(assertConfigPayload(cfg))
-  )
-  ipcMain.handle('config:reload', () => manager.reload())
-  ipcMain.handle('config:path:get', () => ({ path: manager.getConfigPath() }))
-  ipcMain.handle('config:path:set', async (_event, nextPath: unknown) => {
+  handle(CHANNELS.configGet, () => manager.getConfig())
+  handle(CHANNELS.configSave, async (cfg) => {
+    const next = await manager.saveConfig(assertConfigPayload(cfg))
+    announce()
+    return next
+  })
+  handle(CHANNELS.configReload, async () => {
+    const next = await manager.reload()
+    announce()
+    return next
+  })
+  handle(CHANNELS.configPathGet, () => ({ path: manager.getConfigPath() }))
+  handle(CHANNELS.configPathSet, async (nextPath) => {
     if (typeof nextPath !== 'string' || !nextPath.trim()) throw new Error('invalid config path')
     const resolved = path.resolve(nextPath.trim())
     if (!authorizedConfigPaths.has(resolved)) {
@@ -140,9 +172,10 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
     }
     await manager.useStore(new FileConfigStore(resolved))
     await saveSettings({ configPath: resolved })
+    announce()
     return manager.getConfig()
   })
-  ipcMain.handle('config:open', async () => {
+  handle(CHANNELS.configOpen, async () => {
     const result = await dialog.showOpenDialog({
       title: '选择配置文件',
       properties: ['openFile', 'createDirectory'],
@@ -155,9 +188,10 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
     const chosen = authorizeConfigPath(result.filePaths[0]!)
     await manager.useStore(new FileConfigStore(chosen))
     await saveSettings({ configPath: chosen })
+    announce()
     return { path: chosen, config: await manager.getConfig() }
   })
-  ipcMain.handle('config:save-as', async () => {
+  handle(CHANNELS.configSaveAs, async () => {
     const result = await dialog.showSaveDialog({
       // Credentials never leave the encrypted store, so say so up front.
       title: '导出配置（不含密码）',
@@ -168,20 +202,21 @@ export async function registerIpc(manager: TunnelManager): Promise<void> {
     await fs.writeFile(result.filePath, await manager.exportConfig(), 'utf-8')
     return { path: result.filePath }
   })
-  ipcMain.handle('config:reveal', async () => {
+  handle(CHANNELS.configReveal, async () => {
     const cfgPath = manager.getConfigPath()
     await manager.ensureConfigFile()
     shell.showItemInFolder(cfgPath)
     return { path: cfgPath }
   })
-  ipcMain.handle('config:reset', async () => {
+  handle(CHANNELS.configReset, async () => {
     // Re-write the default template and reload it.
     const cfg = defaultConfig()
     await manager.saveConfig(cfg)
+    announce()
     return cfg
   })
 
-  ipcMain.handle('app:info', async () => {
+  handle(CHANNELS.appInfo, async () => {
     const sshPath = await findOnPathFirst('ssh')
     const plinkPath =
       (await findOnPathFirst('plink')) ?? plinkCandidates().find((p) => existsSync(p)) ?? null

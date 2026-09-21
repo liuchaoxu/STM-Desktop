@@ -26,16 +26,19 @@
 
 ```
 渲染进程 (Vue 3)  ──contextBridge──►  preload: window.api  ──IPC──►  主进程 (Electron / Node)
+                                                                    ├─ src/shared/contract.ts 唯一契约：通道名 + 参数/返回类型 + window.api 形状
                                                                     ├─ src/main/ipc.ts        IPC 通道、对话框、路径持久化
+                                                                    ├─ src/main/status.ts     状态循环：投影 + 变更推送 + 变更后立即推
                                                                     ├─ src/core/manager.ts    配置生命周期 + 生命周期编排（平台无关）
                                                                     ├─ src/core/config.ts     配置解析/序列化/校验/继承合并
                                                                     └─ src/platforms/node/    桌面传输层：spawn ssh/plink、PID 状态、日志
 ```
 
+- **共享契约**（`src/shared/contract.ts`）：IPC 通道常量、每个通道的参数与返回类型、`window.api` 的形状，全部只写一遍。preload 实现 `StmApi`、主进程用泛型 `handle()` 注册 handler，两边都对同一张类型表做检查 —— 通道名打错、参数/返回值对不上、少注册一个 handler 都是**编译错误**（渲染侧只保留把契约类型映射成全局别名的 `api.d.ts`）
 - **平台无关核心**（`src/core/`）：领域模型、配置解析/序列化/校验/继承合并、生命周期编排（并发锁、批量调度、视图投影），不引用 `fs`/`path`/`net`/`child_process`（由 ESLint 强制），可跑在任何运行时
-- **平台实现**（`src/platforms/node/`）：桌面传输层，基于 Node 标准库 spawn 系统 `ssh` 或内置 `plink`，负责 PID 状态文件、端口探测、停止升级与日志轮转，不依赖第三方包。新增平台（Android / iOS）只需实现 `ConfigStore` / `SecretStore` / `TunnelTransport` 三个接口
-- **预加载**（`src/preload/`）：通过 `contextBridge` 暴露类型安全的 `window.api`（`tunnel` / `config` / `app`）
-- **渲染进程**（`src/renderer/`）：Vue 3 单页界面，2 秒轮询刷新隧道状态；样式为 Tailwind v4（**未启用 Preflight**，且工具类位于 `utilities` 层，因此不会覆盖迁移中的存量 CSS）+ 手写 CSS；动效与背景来自 [vue-bits](https://vue-bits.dev) 的组件移植（`components/bits/`），其中 WebGL 部分依赖 `ogl`，Dock 的弹簧依赖 `motion-v`
+- **平台实现**（`src/platforms/node/`）：桌面传输层，基于 Node 标准库 spawn 系统 `ssh` 或内置 `plink`，负责 PID 状态文件、端口探测、停止升级与日志轮转，不依赖第三方包。新增平台（Android / iOS）只需实现 `ConfigStore` / `SecretStore` / `TunnelTransport` 三个接口。进程存活判定在 Windows 上用**一次** `tasklist` 全量快照（缓存 900ms）完成，而不是每条隧道一次进程枚举
+- **预加载**（`src/preload/`）：通过 `contextBridge` 暴露类型安全的 `window.api`（`tunnel` / `config` / `app`），并订阅主进程推送
+- **渲染进程**（`src/renderer/`）：Vue 3 单页界面。隧道状态由**主进程循环推送**（`main/status.ts`：仅在窗口可见时按 2s 投影、内容没变不推送、启停/改配置后立即推），渲染层只订阅，自己留 15s 兜底轮询；样式为 Tailwind v4（**未启用 Preflight**，且工具类位于 `utilities` 层，因此不会覆盖迁移中的存量 CSS）+ 手写 CSS；动效与背景来自 [vue-bits](https://vue-bits.dev) 的组件移植（`components/bits/`），其中 WebGL 部分依赖 `ogl`，Dock 的弹簧依赖 `motion-v`
 
 ## 快速开始
 
@@ -202,7 +205,7 @@ npm run smoke
 
 `npm run smoke` 覆盖：真实 `tunnel.conf` 解析与三级继承合并、序列化往返一致性、旧格式段兼容、缺字段/非法端口/重复隧道/重复键等错误场景、目标解析（all/组/精确）、plink 与 OpenSSH 命令构建（含密码脱敏）、完整的 启动→状态→日志→重复启动→停止→重启 生命周期、端口占用冲突、默认模板有效性。
 
-其中**平台无关核心**用一个内存 `ConfigStore` + 内存 `SecretStore` + 内存 `TunnelTransport` 驱动（零进程、零 socket、零文件），覆盖批量启停/重启、按隧道的生命周期锁（并发启动只起一次）、传输失败上抛、端口冲突、日志与校验投影、配置切换失败回滚，以及完整的凭据流程（明文注入界面、密文抽取落盘、导出剔除凭据、重命名迁移、清空删除、无凭据库时保持明文）；**桌面传输层**则用真实 spawn 的假 SSH 客户端覆盖进程启停、状态文件清理、停止升级（SIGKILL）、日志轮转与 `-pwfile` 暂存文件生命周期；另有 URL 策略与 IPC 入参校验的断言。共 132 项断言。
+其中**平台无关核心**用一个内存 `ConfigStore` + 内存 `SecretStore` + 内存 `TunnelTransport` 驱动（零进程、零 socket、零文件），覆盖批量启停/重启、按隧道的生命周期锁（并发启动只起一次）、传输失败上抛、端口冲突、日志与校验投影、配置切换失败回滚，以及完整的凭据流程（明文注入界面、密文抽取落盘、导出剔除凭据、重命名迁移、清空删除、无凭据库时保持明文）；**桌面传输层**则用真实 spawn 的假 SSH 客户端覆盖进程启停、状态文件清理、停止升级（SIGKILL）、日志轮转与 `-pwfile` 暂存文件生命周期；另有 URL 策略、IPC 入参校验、**共享契约**（通道名唯一且带命名空间、推送通道不与 invoke 通道重名、config 通道齐全）与 **Windows 进程快照解析**（引号内逗号、脏行、空表）的断言。共 140 项断言。
 
 其中密码加密的"加密 → 落盘 → 解密"往返由端到端检查一并验证。
 
@@ -212,7 +215,7 @@ npm run smoke
 
 界面动效的取证还包括：跑马灯同屏是否重复（`maxVisibleRepeat`，应为 1）、间距是否真的生效（`gap`，并额外用一个离屏探针元素验证那条工具类本身有没有被 CSS 层序吃掉）、毛玻璃是否生效（`backdropFilter`，前缀与标准写法都读）、每个界面上电气边框的宿主数量与画布上**实际描边的墨迹像素数**（`ink`）、**表格列对齐**（`align.deltas`：表头行与每个数据行同一单元格的左边缘差，应全为 0）、**每行的 🌐 打开按钮**（`webButtons` 的禁用态与 tooltip 里的地址，必须与 `runningRows` 一致），以及**计数器滚动**（`COUNTER ROLL`：数字轮偏离窗口中心的 `lift` > 1，说明确实在滚而不是瞬间跳值）。
 
-隧道行的电气边框需要“运行中 / 连接中”才点亮，而启动真实隧道会真的去连用户的服务器，所以脚本改为伪造应用自己的状态判据：往运行时目录写一个 `pid` 指向探针自身、端口从未监听的状态文件，等 2 秒轮询算出状态后取证（此时行边框点亮、计数从 0 滚到 1），随后立刻删除该文件（截图 `out/shots/11-row-electric-border.png`）。
+隧道行的电气边框需要“运行中 / 连接中”才点亮，而启动真实隧道会真的去连用户的服务器，所以脚本改为伪造应用自己的状态判据：往运行时目录写一个 `pid` 指向探针自身、端口从未监听的状态文件，等主进程状态循环（2s）算出状态后取证（此时行边框点亮、计数从 0 滚到 1），随后立刻删除该文件（截图 `out/shots/11-row-electric-border.png`）。这一窗口（3.6s）比渲染侧的兜底轮询（15s）短，所以它还顺带证明了状态是**主进程推过来的**（`pushes` 计数 + UI 在同一窗口内变化）。
 
 端到端 IPC 检查（可选，需先 `npm run build`）：
 
@@ -233,27 +236,32 @@ STM Desktop/
 │  │  ├─ storage.ts             # ConfigStore / SecretStore 接口
 │  │  ├─ transport.ts           # TunnelTransport 接口（唯一与平台耦合的能力）
 │  │  └─ manager.ts             # 配置生命周期 + 生命周期编排（锁/并发/视图投影）
+│  ├─ shared/
+│  │  └─ contract.ts            # 唯一契约：IPC 通道常量 + 参数/返回类型 + window.api 形状
 │  ├─ platforms/
 │  │  └─ node/                  # 桌面实现
 │  │     ├─ config-store.ts     # FileConfigStore（原子写）
-│  │     ├─ exec-transport.ts   # spawn ssh/plink、PID 状态、端口探测、日志轮转
+│  │     ├─ exec-transport.ts   # spawn ssh/plink、PID 状态、端口探测、日志轮转、进程快照
 │  │     ├─ tail-file.ts        # 多字节安全的分块尾部读取
 │  │     └─ index.ts            # createTunnelManager 装配
 │  ├─ main/                     # Electron 壳
-│  │  ├─ index.ts               # 应用入口：创建窗口、注册 IPC
-│  │  └─ ipc.ts                 # IPC 通道、对话框、路径持久化
+│  │  ├─ index.ts               # 应用入口：创建窗口、注册 IPC、启停状态循环
+│  │  ├─ ipc.ts                 # IPC 通道、对话框、路径持久化（契约类型化 handler）
+│  │  ├─ status.ts              # 状态循环：投影 + 变更推送（仅在窗口可见时运行）
+│  │  ├─ security.ts            # 导航/弹窗/权限加固 + openExternal 白名单
+│  │  └─ secret-store.ts        # safeStorage → secrets.json
 │  ├─ preload/
-│  │  ├─ index.ts               # contextBridge 暴露 window.api
-│  │  └─ api.d.ts               # 全局 API 类型（渲染进程与主进程共用）
+│  │  ├─ index.ts               # contextBridge 暴露 window.api（实现 StmApi + 订阅推送）
+│  │  └─ api.d.ts               # 把契约类型映射成渲染侧的全局别名
 │  └─ renderer/
 │     └─ src/
 │        ├─ App.vue             # 布局：头部/页签/视图切换
 │        ├─ views/              # TunnelsView / ConfigView / LogsView
 │        ├─ components/         # KeyValueEditor / ToastHost
 │        │  ├─ bits/            # 动效与背景件：SpecularButton / Dock(+DockItem) / MetallicPaint / Silk / BorderGlow / LogoLoop / ElectricBorder / Counter(+CounterDigit) / AnimatedContent / RevealPanel
-│        │  │                    # 未使用（保留备查）：GooeyNav / SpotlightCard / ShinyText / CountUp
+│        │  │                    # 未使用（保留备查）：GooeyNav / SpotlightCard / ShinyText / CountUp / DepthText
 │        │  └─ config/          # 配置页卡片：SummaryCard / TunnelCard / OptionsEditor / GroupEditorModal
-│        ├─ composables/        # 状态轮询、Toast、页签共享状态
+│        ├─ composables/        # 状态订阅（主进程推送）+ 兜底轮询、Toast、页签共享状态
 │        └─ assets/main.css     # 深色主题样式 + 动效
 ├─ scripts/
 │  ├─ tunnel-smoke.ts           # 引擎冒烟测试（npm run smoke）

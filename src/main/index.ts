@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createManager, registerIpc } from './ipc'
 import { hardenWebContents, SECURE_WEB_PREFERENCES } from './security'
+import { startStatusBroadcast } from './status'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -58,15 +59,19 @@ if (!app.requestSingleInstanceLock()) {
       optimizer.watchWindowShortcuts(window)
     })
 
-    // Tunnel manager + IPC surface.
+    // Tunnel manager + IPC surface. The status broadcaster owns the refresh loop
+    // for every window (see `status.ts`), including the pushes after mutations.
     const manager = createManager()
-    await registerIpc(manager)
+    const status = startStatusBroadcast(manager)
+    await registerIpc(manager, status)
 
     createWindow()
 
     app.on('activate', function () {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+
+    app.on('before-quit', () => status.stop())
   })
 }
 

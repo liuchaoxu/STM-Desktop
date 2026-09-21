@@ -11,6 +11,13 @@ const busy = ref(false)
 const busyLabel = ref('')
 
 let timer: ReturnType<typeof setInterval> | undefined
+let unsubscribe: (() => void) | undefined
+
+/**
+ * Safety net only: the shell pushes the projection (see `src/main/status.ts`), so
+ * this exists to heal a window that somehow missed an update — not to drive the UI.
+ */
+const FALLBACK_POLL_MS = 15000
 
 export function useTunnelStore(): {
   tunnels: typeof tunnels
@@ -20,8 +27,8 @@ export function useTunnelStore(): {
   busy: typeof busy
   busyLabel: typeof busyLabel
   refresh: () => Promise<void>
-  startPolling: (ms?: number) => void
-  stopPolling: () => void
+  startLiveUpdates: (ms?: number) => void
+  stopLiveUpdates: () => void
   execute: (action: Action, target: string) => Promise<ActionResult | null>
 } {
   const toast = useToast()
@@ -40,14 +47,22 @@ export function useTunnelStore(): {
     }
   }
 
-  function startPolling(ms = 2000): void {
-    stopPolling()
+  /** Subscribes to the shell's pushes and arms the fallback poll. */
+  function startLiveUpdates(ms = FALLBACK_POLL_MS): void {
+    stopLiveUpdates()
+    unsubscribe = window.api.tunnel.onChanged((views) => {
+      tunnels.value = views
+      lastUpdated.value = Date.now()
+      loadError.value = ''
+    })
     timer = setInterval(() => {
       if (!document.hidden) void refresh()
     }, ms)
   }
 
-  function stopPolling(): void {
+  function stopLiveUpdates(): void {
+    unsubscribe?.()
+    unsubscribe = undefined
     if (timer) {
       clearInterval(timer)
       timer = undefined
@@ -87,8 +102,8 @@ export function useTunnelStore(): {
     busy,
     busyLabel,
     refresh,
-    startPolling,
-    stopPolling,
+    startLiveUpdates,
+    stopLiveUpdates,
     execute
   }
 }

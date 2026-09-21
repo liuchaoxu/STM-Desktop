@@ -34,7 +34,14 @@ import type { ResolvedTunnel } from '../src/core/types'
 import { TunnelError } from '../src/core/types'
 import { assertConfigPayload, assertTarget } from '../src/main/ipc-guard'
 import { isAllowedExternalUrl, isInternalNavigation } from '../src/main/url-policy'
-import { ExecTransport, FileConfigStore, tailFile, type BuiltCommand } from '../src/platforms/node'
+import {
+  ExecTransport,
+  FileConfigStore,
+  parseTasklistCsv,
+  tailFile,
+  type BuiltCommand
+} from '../src/platforms/node'
+import { CHANNELS, TUNNEL_CHANGED } from '../src/shared/contract'
 
 // `npm run smoke` always runs from the package root.
 const PROJECT_ROOT = process.cwd()
@@ -775,6 +782,49 @@ async function main(): Promise<void> {
     throws('non-string target rejected', () => assertTarget(42), /invalid target/)
     throws('empty target rejected', () => assertTarget('   '), /invalid target/)
     throws('oversized target rejected', () => assertTarget('x'.repeat(500)), /too long/)
+
+    // The IPC contract is the single source of truth for channel names. Types cover
+    // the shapes; these cover the names themselves (a copy-paste collision compiles).
+    // Widened to string[] on purpose: the point of the next check is that the push
+    // channel is *not* one of the invoke channels, which the narrow type already
+    // proves — so assert it at runtime too.
+    const channelNames: readonly string[] = Object.values(CHANNELS)
+    check('every IPC channel name is unique', new Set(channelNames).size === channelNames.length)
+    check(
+      'every IPC channel is namespaced',
+      channelNames.every((name) => /^[a-z]+:/.test(name))
+    )
+    check('push channel is not an invoke channel', !channelNames.includes(TUNNEL_CHANGED))
+    check(
+      'config surface is fully declared',
+      [
+        'configGet',
+        'configSave',
+        'configReload',
+        'configPathGet',
+        'configPathSet',
+        'configOpen',
+        'configSaveAs',
+        'configReveal',
+        'configReset'
+      ].every((key) => key in CHANNELS)
+    )
+
+    // Windows liveness: one unfiltered snapshot instead of a `tasklist` spawn per
+    // tunnel, so the parsing has to survive real-world output.
+    const listing = parseTasklistCsv(
+      '"ssh.exe","1234","Console","1","12,345 K"\r\n"plink.exe","4321","Console","1","9,000 K"\r\n'
+    )
+    check(
+      'tasklist snapshot maps pid to image',
+      listing.get(1234) === 'ssh.exe' && listing.get(4321) === 'plink.exe'
+    )
+    check('tasklist keeps quoted commas intact', listing.size === 2)
+    check(
+      'tasklist skips lines it cannot parse',
+      parseTasklistCsv('INFO: no tasks are running\n"broken line\n"x.exe","not-a-pid"').size === 0
+    )
+    check('tasklist handles an empty listing', parseTasklistCsv('').size === 0)
 
     const good = parseConfig(
       '[defaults]\nserver_port=22\n[group:g]\nserver=s\nusername=u\n[tunnel:g:t]\nlocal_port=1\nremote_host=h\nremote_port=2\n'
