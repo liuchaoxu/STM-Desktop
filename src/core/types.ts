@@ -59,6 +59,10 @@ export interface TunnelView {
   pid: number | null
   local: string
   remote: string
+  /** Epoch ms the current session started, so the UI can show an uptime. */
+  startedAt: number | null
+  /** Reconnects the shell performed on this tunnel during this app run. */
+  restarts: number
 }
 
 /** Result of a start/stop/restart batch operation. */

@@ -12,9 +12,10 @@ import { existsSync, promises as fs } from 'fs'
 import { createConnection } from 'net'
 import * as os from 'os'
 import * as path from 'path'
-import { safeStem } from '../../core/config'
+import { safeStem, forwardSpec } from '../../core/config'
 import type {
   DescribeResult,
+  TransportExit,
   TransportSession,
   TunnelLogs,
   TunnelTransport
@@ -158,6 +159,12 @@ export class ExecTransport implements TunnelTransport {
   private readonly children = new Map<number, ChildProcess>()
   /** Children we spawned that already reported 'exit' (see `probeAlive`). */
   private readonly exited = new Set<number>()
+  /** pid → tunnel key, so an exit can be attributed to a tunnel. */
+  private readonly keys = new Map<number, string>()
+  /** pids the app is deliberately stopping; their exits are not failures. */
+  private readonly stopping = new Set<number>()
+  /** Unexpected deaths waiting for the manager to pick up (see `takeExits`). */
+  private readonly exits: TransportExit[] = []
   /** Windows process listing, reused across a status refresh (see `tasklistImages`). */
   private images: { at: number; byPid: Map<number, string> } | null = null
   private sweptPasswordFiles = false
@@ -221,10 +228,19 @@ export class ExecTransport implements TunnelTransport {
       await errHandle.close()
       throw error
     }
-    const cleanup = (): void => {
+    const cleanup = (code: number | null): void => {
       if (child.pid !== undefined) {
+        const key = this.keys.get(child.pid)
         this.children.delete(child.pid)
+        this.keys.delete(child.pid)
         this.recordExit(child.pid)
+        // Report only deaths the app did not ask for: `close()` marks the pid it is
+        // stopping, so a deliberate stop is never mistaken for a dropped tunnel.
+        if (key !== undefined && !this.stopping.has(child.pid)) {
+          this.exits.push({ key, pid: child.pid, code })
+          if (this.exits.length > 64) this.exits.splice(0, this.exits.length - 64)
+        }
+        this.stopping.delete(child.pid)
       }
       void outHandle.close().catch(() => undefined)
       void errHandle.close().catch(() => undefined)
@@ -232,11 +248,12 @@ export class ExecTransport implements TunnelTransport {
     // Attach listeners BEFORE checking the pid: when spawn fails (e.g. ENOENT),
     // Node emits 'error' asynchronously. If the listener is attached only after
     // throwing below, that event is unhandled and crashes the main process.
-    child.on('exit', cleanup)
+    child.on('exit', (code) => cleanup(code))
     child.on('error', (error) => {
       spawnState.error = error
-      cleanup()
+      cleanup(null)
     })
+    if (child.pid !== undefined) this.keys.set(child.pid, t.key)
     if (child.pid === undefined) {
       await outHandle.close()
       await errHandle.close()
@@ -277,11 +294,13 @@ export class ExecTransport implements TunnelTransport {
   }
 
   async close(t: ResolvedTunnel, session: TransportSession): Promise<void> {
+    const pid = session.pid
     try {
-      const pid = session.pid
       if (pid === null) {
         throw new TunnelError(`[${t.key}] session ${session.id} has no OS process to stop`)
       }
+      // Marked before signalling: the 'exit' handler must not file this as a crash.
+      this.stopping.add(pid)
       const data = (await this.readStateFile(t)) ?? {
         pid,
         client: this.kind,
@@ -309,6 +328,10 @@ export class ExecTransport implements TunnelTransport {
       // A running plink has already read the staged password, so the file never
       // needs to outlive the session.
       await this.removePasswordFile(t)
+      // If nothing was left running, drop the mark so a recycled pid cannot hide a
+      // later genuine crash. (When the process *did* survive, the mark stays: its
+      // exit must still not be reported as a crash.)
+      if (pid !== null && !this.children.has(pid)) this.stopping.delete(pid)
     }
   }
 
@@ -316,9 +339,25 @@ export class ExecTransport implements TunnelTransport {
     const out = new Map<string, TransportSession>()
     for (const t of tunnels) {
       const data = await this.readStateFile(t)
-      if (data) out.set(t.key, { id: String(data.pid), pid: data.pid })
+      if (data) {
+        out.set(t.key, {
+          id: String(data.pid),
+          pid: data.pid,
+          startedAt: data.startedAt || undefined
+        })
+      }
     }
     return out
+  }
+
+  /**
+   * Deaths the manager has not been told about yet. Draining rather than pushing
+   * keeps the wiring one-directional: the transport never needs a reference to the
+   * manager (the manager is built around it).
+   */
+  takeExits(): TransportExit[] {
+    if (this.exits.length === 0) return []
+    return this.exits.splice(0, this.exits.length)
   }
 
   async logs(t: ResolvedTunnel, lines: number): Promise<TunnelLogs> {
@@ -615,10 +654,25 @@ export class ExecTransport implements TunnelTransport {
   private buildCommand(t: ResolvedTunnel): BuiltCommand {
     const { exe, kind } = this.resolveClient(t)
     const v = t.values
-    const bind = v.local_bind || '127.0.0.1'
-    const forward = `${bind}:${v.local_port}:${v.remote_host}:${v.remote_port}`
+    const spec = forwardSpec(t)
     const rawKey = v.private_key ? expandHome(v.private_key) : ''
     const key = rawKey && !path.isAbsolute(rawKey) ? path.resolve(this.rootDir, rawKey) : rawKey
+
+    // One flag list for both clients: they agree on -L / -D / -R, and disagree only
+    // about the jump host (plink has no -J), which is rejected rather than silently
+    // dropped — a tunnel that quietly ignores its bastion is worse than an error.
+    const forwards: string[] = []
+    if (spec.jump) {
+      if (kind === 'plink') {
+        throw new TunnelError(
+          `[${t.key}] proxy_jump requires the OpenSSH client (client=ssh); plink has no -J`
+        )
+      }
+      forwards.push('-J', spec.jump)
+    }
+    if (spec.local) forwards.push('-L', spec.local)
+    if (spec.dynamic) forwards.push('-D', spec.dynamic)
+    if (spec.remote) forwards.push('-R', spec.remote)
 
     if (kind === 'plink') {
       const cmd = [
@@ -628,8 +682,7 @@ export class ExecTransport implements TunnelTransport {
         v.server_port || '22',
         '-l',
         v.username,
-        '-L',
-        forward,
+        ...forwards,
         '-N',
         '-batch'
       ]
@@ -657,8 +710,7 @@ export class ExecTransport implements TunnelTransport {
       '-T',
       '-p',
       v.server_port || '22',
-      '-L',
-      forward,
+      ...forwards,
       '-o',
       'ExitOnForwardFailure=yes',
       '-o',

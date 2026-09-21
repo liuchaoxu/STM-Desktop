@@ -20,6 +20,22 @@ export interface TransportSession {
   readonly id: string
   /** OS process id when the transport runs a child process, otherwise null. */
   readonly pid: number | null
+  /** When the session was started (epoch ms), for the uptime column. */
+  readonly startedAt?: number
+  /** Reconnects the shell has performed on this session's tunnel. */
+  readonly restarts?: number
+}
+
+/**
+ * A session that ended on its own — the client crashed, the network dropped, the
+ * server closed the connection. Deliberate stops are not reported here, so the
+ * manager can tell "this tunnel died" from "the user stopped it".
+ */
+export interface TransportExit {
+  readonly key: string
+  readonly pid: number | null
+  /** The client's exit code when the OS reported one. */
+  readonly code: number | null
 }
 
 /** Result of asking the transport to explain one tunnel. */
@@ -75,4 +91,12 @@ export interface TunnelTransport {
 
   /** stdout / stderr tails for one tunnel. */
   logs(t: ResolvedTunnel, lines: number): Promise<TunnelLogs>
+
+  /**
+   * Sessions that died on their own since the last call, then forgets them.
+   *
+   * Optional: a transport that cannot observe its sessions simply never reports
+   * exits, and the manager will not try to reconnect anything.
+   */
+  takeExits?(): TransportExit[]
 }

@@ -50,6 +50,7 @@ const api: StmApi = {
     getPath: () => invoke(CHANNELS.configPathGet),
     setPath: (path) => invoke(CHANNELS.configPathSet, path),
     open: () => invoke(CHANNELS.configOpen),
+    importFrom: () => invoke(CHANNELS.configImport),
     saveAs: () => invoke(CHANNELS.configSaveAs),
     reveal: () => invoke(CHANNELS.configReveal),
     reset: () => invoke(CHANNELS.configReset)

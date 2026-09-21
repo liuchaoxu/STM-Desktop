@@ -26,6 +26,7 @@ export const CHANNELS = {
   configPathGet: 'config:path:get',
   configPathSet: 'config:path:set',
   configOpen: 'config:open',
+  configImport: 'config:import',
   configSaveAs: 'config:save-as',
   configReveal: 'config:reveal',
   configReset: 'config:reset',
@@ -49,6 +50,18 @@ export interface AppInfo {
   runtimeDir: string
 }
 
+/** What an import actually added, plus the merged draft config. */
+export interface ConfigImportResult {
+  /** Which parser matched, e.g. "OpenSSH 配置" — shown in the toast. */
+  source: string
+  groups: number
+  tunnels: number
+  /** Entries dropped because that group/tunnel already existed. */
+  skipped: number
+  warnings: string[]
+  config: ConfigData
+}
+
 /**
  * Arguments and result per channel. Both sides are generic over this, so whichever
  * side drifts fails to compile.
@@ -66,6 +79,7 @@ export interface IpcContract {
   [CHANNELS.configPathGet]: { args: []; result: { path: string } }
   [CHANNELS.configPathSet]: { args: [path: string]; result: ConfigData }
   [CHANNELS.configOpen]: { args: []; result: { path: string; config: ConfigData } | null }
+  [CHANNELS.configImport]: { args: []; result: ConfigImportResult | null }
   [CHANNELS.configSaveAs]: { args: []; result: { path: string } | null }
   [CHANNELS.configReveal]: { args: []; result: { path: string } }
   [CHANNELS.configReset]: { args: []; result: ConfigData }
@@ -97,6 +111,8 @@ export interface ConfigApi {
   getPath(): Promise<{ path: string }>
   setPath(path: string): Promise<ConfigData>
   open(): Promise<{ path: string; config: ConfigData } | null>
+  /** Pick a foreign config file, parse it and return the merged draft. */
+  importFrom(): Promise<ConfigImportResult | null>
   saveAs(): Promise<{ path: string } | null>
   reveal(): Promise<{ path: string }>
   reset(): Promise<ConfigData>

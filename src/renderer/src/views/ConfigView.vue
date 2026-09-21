@@ -32,6 +32,7 @@ const actionItems = computed<DockItemData[]>(() => [
     onClick: () => void save()
   },
   { icon: '🔄', label: '重新加载', disabled: loading.value, onClick: reloadConfig },
+  { icon: '📥', label: '导入…', onClick: () => void importFrom() },
   { icon: '📂', label: '打开配置…', onClick: () => void openConfig() },
   { icon: '📤', label: '另存为…', onClick: () => void saveAs() },
   { icon: '📁', label: '打开配置目录', onClick: () => void revealConfig() },
@@ -388,6 +389,34 @@ watch(groupEntries, (entries) => {
 })
 
 // ------------------------------------------------------------ file operations
+
+/**
+ * Import from another tool (OpenSSH config, a PuTTY `.reg` export, mRemoteNG).
+ *
+ * The shell picks and parses the file, then returns the merged *draft* — the import
+ * lands in the editor, not on disk, so it can be reviewed and saved (or discarded)
+ * like any other edit. Imported tunnels arrive disabled with their ports missing:
+ * those tools do not describe local forwards.
+ */
+async function importFrom(): Promise<void> {
+  try {
+    const result = await window.api.config.importFrom()
+    if (!result) return
+    cfg.value = result.config
+    error.value = ''
+    goTo({ kind: 'overview' }, 'back')
+    toast.success(
+      `已导入 ${result.groups} 个组、${result.tunnels} 条隧道` +
+        (result.skipped > 0 ? `（跳过 ${result.skipped} 条重复）` : '') +
+        '，请补全端口后保存'
+    )
+    if (result.warnings.length > 0) {
+      toast.info(result.warnings.slice(0, 3).join('；'))
+    }
+  } catch (importError) {
+    showError(importError instanceof Error ? importError.message : String(importError))
+  }
+}
 
 async function openConfig(): Promise<void> {
   try {

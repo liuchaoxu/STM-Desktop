@@ -51,6 +51,9 @@ export function startStatusBroadcast(manager: TunnelManager): StatusBroadcaster 
 
     projecting = true
     try {
+      // Apply the auto-reconnect policy before projecting, so a reconnect that is
+      // due shows up in the same push that reported the death.
+      await manager.reconcile()
       const views = await manager.list()
       const signature = signatureOf(views)
       if (!force && signature === lastSignature) return

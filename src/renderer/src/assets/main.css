@@ -550,6 +550,13 @@ body {
   white-space: nowrap;
 }
 
+/* Uptime next to the PID: same size as the mono text, quieter than it. */
+.pid-uptime {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .col-actions {
   display: flex;
   gap: 6px;

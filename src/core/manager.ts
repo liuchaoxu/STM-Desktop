@@ -11,6 +11,7 @@
  */
 import {
   defaultConfig,
+  isEnabledValue,
   parseConfig,
   PASSWORD_PLACEHOLDER,
   resolveTarget,
@@ -111,6 +112,35 @@ function handleOf(session: TransportSession): string {
   return session.pid === null ? session.id : `PID ${session.pid}`
 }
 
+/** How long a tunnel must stay up before its backoff budget is refunded. */
+const HEALTHY_AFTER_MS = 30_000
+/** Ceiling for the exponential backoff. */
+const MAX_BACKOFF_MS = 60_000
+
+/**
+ * Auto-reconnect settings, read from a tunnel's merged values.
+ *
+ * `auto_restart` defaults to on: a tunnel that dies because the network blipped is
+ * the single most common failure this app has, and "silently stopped" is the worst
+ * possible outcome. It never fights the user — only sessions the app is *keeping*
+ * alive are reconnected (see `desired`).
+ */
+interface RestartPolicy {
+  enabled: boolean
+  limit: number
+  baseDelayMs: number
+}
+
+function restartPolicy(values: Record<string, string>): RestartPolicy {
+  const limit = Number((values.restart_limit ?? '').trim() || '5')
+  const delay = Number((values.restart_delay ?? '').trim() || '2')
+  return {
+    enabled: isEnabledValue(values.auto_restart ?? 'true'),
+    limit: Number.isInteger(limit) && limit >= 0 ? limit : 5,
+    baseDelayMs: (Number.isFinite(delay) && delay >= 0 ? delay : 2) * 1000
+  }
+}
+
 export class TunnelManager {
   private store: ConfigStore
   private readonly transport: TunnelTransport
@@ -118,6 +148,16 @@ export class TunnelManager {
   private config: ConfigData | null = null
   /** Per-tunnel promise chain; see `withLock`. */
   private readonly locks = new Map<string, Promise<unknown>>()
+  /** Tunnels the user asked to stay running; auto-reconnect serves only these. */
+  private readonly desired = new Set<string>()
+  /** Reconnects performed per tunnel during this app run. */
+  private readonly restarts = new Map<string, number>()
+  /** Consecutive reconnect attempts, for the exponential backoff. */
+  private readonly attempts = new Map<string, number>()
+  /** Pending reconnect timers, so stopping a tunnel can cancel one. */
+  private readonly reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** When the current session was (re)established, to refund the backoff. */
+  private readonly upSince = new Map<string, number>()
 
   constructor(opts: TunnelManagerOptions) {
     this.store = opts.store
@@ -306,20 +346,19 @@ export class TunnelManager {
   }
 
   private async startUnlocked(t: ResolvedTunnel): Promise<string> {
+    this.desired.add(t.key)
     const running = await this.sessionFor(t)
     if (running) return `[${t.key}] already running (${handleOf(running)})`
 
     const bind = t.values.local_bind || '127.0.0.1'
-    const port = Number(t.values.local_port)
+    const port = (t.values.local_port || t.values.dynamic_port || '').trim()
     if (await this.transport.probeLocalPort(t)) {
-      throw new TunnelError(`[${t.key}] local port ${bind}:${port} is in use`)
+      throw new TunnelError(`[${t.key}] local port ${bind}:${port || '?'} is in use`)
     }
 
     const session = await this.transport.open(t)
-    return (
-      `[${t.key}] started ${bind}:${port} -> ` +
-      `${t.values.remote_host}:${t.values.remote_port} (${handleOf(session)})`
-    )
+    this.upSince.set(t.key, Date.now())
+    return `[${t.key}] started ${t.local} -> ${t.remote} (${handleOf(session)})`
   }
 
   async stop(t: ResolvedTunnel): Promise<string> {
@@ -327,10 +366,94 @@ export class TunnelManager {
   }
 
   private async stopUnlocked(t: ResolvedTunnel): Promise<string> {
+    // Before anything else: a reconnect must not be scheduled *during* the stop.
+    this.desired.delete(t.key)
+    this.cancelReconnect(t.key)
+    this.attempts.delete(t.key)
+    this.upSince.delete(t.key)
     const session = await this.sessionFor(t)
     if (!session) return `[${t.key}] is not running`
     await this.transport.close(t, session)
     return `[${t.key}] stopped`
+  }
+
+  private cancelReconnect(key: string): void {
+    const timer = this.reconnectTimers.get(key)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    this.reconnectTimers.delete(key)
+  }
+
+  /**
+   * Apply the auto-reconnect policy to whatever the transport reported since the
+   * last call.
+   *
+   * Driven by the shell's status loop rather than a timer of its own, so the whole
+   * app agrees on one tick and a headless manager can be stepped deterministically.
+   * The transport only reports deaths nobody asked for, so this can never resurrect
+   * a tunnel the user stopped.
+   */
+  async reconcile(): Promise<void> {
+    const tunnels = await this.resolved().catch(() => [] as ResolvedTunnel[])
+    const byKey = new Map(tunnels.map((t) => [t.key, t]))
+
+    // A tunnel that has been healthy for a while gets its attempt budget back:
+    // otherwise a link that flaps once an hour eventually stops reconnecting.
+    const now = Date.now()
+    for (const key of this.desired) {
+      const since = this.upSince.get(key)
+      if (since !== undefined && now - since > HEALTHY_AFTER_MS) {
+        this.attempts.delete(key)
+        this.upSince.set(key, now)
+      }
+    }
+
+    for (const exit of this.transport.takeExits?.() ?? []) {
+      const t = byKey.get(exit.key)
+      if (!t || !this.desired.has(exit.key)) continue
+      const policy = restartPolicy(t.values)
+      if (!policy.enabled) {
+        this.desired.delete(exit.key)
+        continue
+      }
+      const attempts = this.attempts.get(exit.key) ?? 0
+      if (attempts >= policy.limit) {
+        // Out of budget: stay stopped, and keep the count so the UI can say so.
+        this.desired.delete(exit.key)
+        continue
+      }
+      this.scheduleReconnect(t, attempts)
+    }
+  }
+
+  private scheduleReconnect(t: ResolvedTunnel, attempts: number): void {
+    if (this.reconnectTimers.has(t.key)) return
+    this.attempts.set(t.key, attempts + 1)
+    const delay = Math.min(restartPolicy(t.values).baseDelayMs * 2 ** attempts, MAX_BACKOFF_MS)
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(t.key)
+      void this.reconnect(t.key).catch(() => undefined)
+    }, delay)
+    // A pending reconnect must not keep the process alive on its own.
+    if (typeof timer === 'object' && typeof timer.unref === 'function') timer.unref()
+    this.reconnectTimers.set(t.key, timer)
+  }
+
+  private async reconnect(key: string): Promise<void> {
+    const tunnels = await this.resolved().catch(() => [] as ResolvedTunnel[])
+    const t = tunnels.find((entry) => entry.key === key)
+    if (!t || !this.desired.has(key)) return
+    try {
+      await this.start(t)
+      this.restarts.set(key, (this.restarts.get(key) ?? 0) + 1)
+    } catch {
+      // A failed attempt burns budget and backs off further; the transport has
+      // already recorded the reason in the tunnel's log.
+      const policy = restartPolicy(t.values)
+      const attempts = this.attempts.get(key) ?? 0
+      if (attempts < policy.limit) this.scheduleReconnect(t, attempts)
+      else this.desired.delete(key)
+    }
   }
 
   async run(action: 'start' | 'stop' | 'restart', target: string): Promise<ActionResult> {
@@ -390,7 +513,9 @@ export class TunnelManager {
         state,
         pid: session?.pid ?? null,
         local: t.local,
-        remote: t.remote
+        remote: t.remote,
+        startedAt: session?.startedAt ?? null,
+        restarts: this.restarts.get(t.key) ?? 0
       })
     }
     return views

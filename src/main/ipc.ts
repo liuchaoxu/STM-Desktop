@@ -19,6 +19,8 @@ import { defaultConfig } from '../core/config'
 import { createTunnelManager, FileConfigStore } from '../platforms/node'
 import { CHANNELS, type IpcArgs, type IpcChannel, type IpcResult } from '../shared/contract'
 import { assertConfigPayload, assertTarget } from './ipc-guard'
+import { loadSettings, patchSettings } from './settings'
+import { importConfigFromFile } from './config-import'
 import { ElectronSecretStore } from './secret-store'
 import type { StatusBroadcaster } from './status'
 
@@ -31,27 +33,6 @@ function handle<K extends IpcChannel>(
   handler: (...args: IpcArgs<K>) => IpcResult<K> | Promise<IpcResult<K>>
 ): void {
   ipcMain.handle(channel, (_event, ...args: unknown[]) => handler(...(args as IpcArgs<K>)))
-}
-
-interface Settings {
-  configPath?: string
-}
-
-function settingsFile(): string {
-  return path.join(app.getPath('userData'), 'settings.json')
-}
-
-async function loadSettings(): Promise<Settings> {
-  try {
-    return JSON.parse(await fs.readFile(settingsFile(), 'utf-8')) as Settings
-  } catch {
-    return {}
-  }
-}
-
-async function saveSettings(settings: Settings): Promise<void> {
-  await fs.mkdir(path.dirname(settingsFile()), { recursive: true })
-  await fs.writeFile(settingsFile(), JSON.stringify(settings, null, 2), 'utf-8')
 }
 
 /**
@@ -171,7 +152,7 @@ export async function registerIpc(
       throw new Error('config path is not authorized')
     }
     await manager.useStore(new FileConfigStore(resolved))
-    await saveSettings({ configPath: resolved })
+    await patchSettings({ configPath: resolved })
     announce()
     return manager.getConfig()
   })
@@ -187,10 +168,11 @@ export async function registerIpc(
     if (result.canceled || result.filePaths.length === 0) return null
     const chosen = authorizeConfigPath(result.filePaths[0]!)
     await manager.useStore(new FileConfigStore(chosen))
-    await saveSettings({ configPath: chosen })
+    await patchSettings({ configPath: chosen })
     announce()
     return { path: chosen, config: await manager.getConfig() }
   })
+  handle(CHANNELS.configImport, () => importConfigFromFile(manager))
   handle(CHANNELS.configSaveAs, async () => {
     const result = await dialog.showSaveDialog({
       // Credentials never leave the encrypted store, so say so up front.

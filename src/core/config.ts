@@ -16,8 +16,23 @@ import { TunnelError } from './types'
 
 const FALSE = new Set(['0', 'false', 'no', 'off'])
 
-const REQUIRED_KEYS = ['server', 'username', 'local_port', 'remote_host', 'remote_port'] as const
-const PORT_KEYS = ['server_port', 'local_port', 'remote_port'] as const
+const PORT_KEYS = ['server_port', 'local_port', 'remote_port', 'dynamic_port'] as const
+
+/**
+ * The forwards a tunnel asks for. A tunnel may carry more than one (an `ssh` client
+ * accepts several `-L`/`-D`/`-R` flags at once), which is why this is a set of
+ * optional specs rather than a single "mode".
+ */
+export interface ForwardSpec {
+  /** `-L bind:local_port:remote_host:remote_port` */
+  local: string | null
+  /** `-D bind:dynamic_port` — a SOCKS5 proxy on the local side. */
+  dynamic: string | null
+  /** `-R bind:port:host:port`, verbatim from `remote_forward`. */
+  remote: string | null
+  /** `-J [user@]host[:port]` — only OpenSSH has this. */
+  jump: string | null
+}
 
 /** Keys are lower-cased, exactly like Python's `optionxform = str.lower`. */
 export function normalizeKey(key: string): string {
@@ -42,15 +57,104 @@ function parsePort(key: string, raw: string | undefined, def: string): number {
   return port
 }
 
+/**
+ * `remote_forward` uses ssh's own `-R` syntax so it can be pasted from a working
+ * `ssh` command line: `port:host:port` or `bind:port:host:port`. Wildcard binds and
+ * `[::1]`-style addresses are left to the client, but the port fields and the target
+ * host are checked here, where the user is still editing.
+ */
+function parseRemoteForward(key: string, raw: string): string {
+  const parts = raw.split(':').map((part) => part.trim())
+  const fields = parts.length === 3 ? ['127.0.0.1', ...parts] : parts
+  if (fields.length !== 4) {
+    throw new TunnelError(`[${key}] remote_forward must be [bind:]port:host:port (got "${raw}")`)
+  }
+  const [bind, port, host, targetPort] = fields as [string, string, string, string]
+  if (!bind) throw new TunnelError(`[${key}] remote_forward bind is empty`)
+  if (!host) throw new TunnelError(`[${key}] remote_forward host is empty`)
+  parsePort(key, port, '')
+  parsePort(key, targetPort, '')
+  return `${bind}:${port}:${host}:${targetPort}`
+}
+
+/** `proxy_jump` is passed to the client verbatim; reject obvious garbage early. */
+function parseProxyJump(key: string, raw: string): string {
+  if (/\s/.test(raw)) throw new TunnelError(`[${key}] proxy_jump must not contain spaces`)
+  const target = raw.includes('@') ? raw.slice(raw.indexOf('@') + 1) : raw
+  if (!target) throw new TunnelError(`[${key}] proxy_jump has no host`)
+  const port = target.includes(':') ? target.slice(target.lastIndexOf(':') + 1) : ''
+  if (port && !/^\d+$/.test(port)) {
+    throw new TunnelError(`[${key}] proxy_jump port must be a number`)
+  }
+  if (port) parsePort(key, port, '')
+  return raw
+}
+
+/**
+ * Which forwards a tunnel resolves to.
+ *
+ * Throws when a tunnel asks for none (the config would otherwise spawn a client with
+ * nothing to forward) and when a spec is malformed. Callers that only want a display
+ * string must use `localDisplay`/`remoteDisplay`, which never throw.
+ */
+export function forwardSpec(t: { key: string; values: Record<string, string> }): ForwardSpec {
+  const v = t.values
+  const bind = (v.local_bind || '127.0.0.1').trim()
+  const localPort = (v.local_port ?? '').trim()
+  const dynamicPort = (v.dynamic_port ?? '').trim()
+  const remoteRaw = (v.remote_forward ?? '').trim()
+  const jumpRaw = (v.proxy_jump ?? '').trim()
+
+  let local: string | null = null
+  if (localPort) {
+    const targetHost = (v.remote_host ?? '').trim()
+    const targetPort = (v.remote_port ?? '').trim()
+    if (!targetHost) throw new TunnelError(`[${t.key}] missing: remote_host`)
+    if (!targetPort) throw new TunnelError(`[${t.key}] missing: remote_port`)
+    parsePort(t.key, localPort, '')
+    parsePort(t.key, targetPort, '')
+    local = `${bind}:${localPort}:${targetHost}:${targetPort}`
+  }
+
+  const dynamic = dynamicPort ? (parsePort(t.key, dynamicPort, ''), `${bind}:${dynamicPort}`) : null
+  const remote = remoteRaw ? parseRemoteForward(t.key, remoteRaw) : null
+
+  if (!local && !dynamic && !remote) {
+    throw new TunnelError(
+      `[${t.key}] missing: one of local_port + remote_host + remote_port, dynamic_port, remote_forward`
+    )
+  }
+
+  return { local, dynamic, remote, jump: jumpRaw ? parseProxyJump(t.key, jumpRaw) : null }
+}
+
+/** The local side as shown in the list; safe on a half-filled config. */
+export function localDisplay(values: Record<string, string>): string {
+  const bind = values.local_bind || '127.0.0.1'
+  const port = (values.local_port ?? '').trim() || (values.dynamic_port ?? '').trim()
+  return port ? `${bind}:${port}` : '—'
+}
+
+/** The remote side as shown in the list; safe on a half-filled config. */
+export function remoteDisplay(values: Record<string, string>): string {
+  if ((values.dynamic_port ?? '').trim()) return 'SOCKS5'
+  if ((values.remote_forward ?? '').trim()) return `⇠ ${values.remote_forward.trim()}`
+  return `${values.remote_host ?? '?'}:${values.remote_port ?? '?'}`
+}
+
 /** Validate one merged tunnel; throws TunnelError listing missing/invalid fields. */
 export function validateTunnel(t: ResolvedTunnel): void {
-  const missing = REQUIRED_KEYS.filter((k) => !t.values[k] || !t.values[k]!.trim())
-  if (missing.length > 0) {
-    throw new TunnelError(`[${t.key}] missing: ${missing.join(', ')}`)
+  const required = (['server', 'username'] as const).filter((k) => !t.values[k]?.trim())
+  if (required.length > 0) {
+    throw new TunnelError(`[${t.key}] missing: ${required.join(', ')}`)
   }
   for (const k of PORT_KEYS) {
-    parsePort(t.key, t.values[k], k === 'server_port' ? '22' : '')
+    if (t.values[k]?.trim()) parsePort(t.key, t.values[k], k === 'server_port' ? '22' : '')
   }
+  // A tunnel with nothing to forward would spawn a client that connects and sits
+  // there doing nothing; a malformed spec is worth catching while editing rather
+  // than when a process fails to come up.
+  forwardSpec(t)
 }
 
 type Section =
@@ -197,10 +301,10 @@ export function mergeTunnel(cfg: ConfigData, def: TunnelDef): ResolvedTunnel {
       return isEnabledValue(values.enabled)
     },
     get local() {
-      return `${values.local_bind ?? '127.0.0.1'}:${values.local_port ?? '?'}`
+      return localDisplay(values)
     },
     get remote() {
-      return `${values.remote_host ?? '?'}:${values.remote_port ?? '?'}`
+      return remoteDisplay(values)
     }
   }
   validateTunnel(tunnel)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useTunnelStore } from '../composables/useTunnelStore'
 import { useUi } from '../composables/ui'
 import BorderGlow from '../components/bits/BorderGlow.vue'
@@ -134,6 +134,51 @@ function openWeb(t: TunnelView): void {
   if (url) window.open(url, '_blank')
 }
 
+/**
+ * Connection stats.
+ *
+ * Uptime comes from the session's `startedAt`, which lives in the state file — so it
+ * stays correct across an app restart and for tunnels adopted from a previous run.
+ * It is rendered from a coarse clock (15 s) because nobody reads uptime to the
+ * second, and a per-second timer would re-render the whole list for nothing. The
+ * reconnect count is per app run and only ever grows when the shell had to restart a
+ * tunnel by itself (see `manager.reconcile`).
+ */
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
+
+function uptime(t: TunnelView): string {
+  if (!t.startedAt || t.state === 'stopped') return ''
+  const seconds = Math.max(0, Math.floor((now.value - t.startedAt) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, '0')}m`
+  return `${Math.floor(hours / 24)}d${String(hours % 24).padStart(2, '0')}h`
+}
+
+function uptimeTitle(t: TunnelView): string {
+  if (!t.startedAt) return '本会话不是由本应用拉起的'
+  const started = new Date(t.startedAt)
+  const restarts = t.restarts > 0 ? `，已自动重连 ${t.restarts} 次` : ''
+  return `启动于 ${started.toLocaleString()}${restarts}`
+}
+
+onMounted(() => {
+  clock = setInterval(() => {
+    // Only while something is actually up: an all-stopped list needs no ticking.
+    if (!document.hidden && tunnels.value.some((t) => t.state !== 'stopped')) {
+      now.value = Date.now()
+    }
+  }, 15000)
+})
+
+onUnmounted(() => {
+  if (clock) clearInterval(clock)
+  clock = undefined
+})
+
 const stateLabel: Record<TunnelView['state'], string> = {
   running: '运行中',
   connecting: '连接中',
@@ -244,12 +289,23 @@ onMounted(() => {
             <span class="col-status">
               <span class="dot" :class="`dot-${t.state}`"></span>
               <span class="pill" :class="`pill-${t.state}`">{{ stateLabel[t.state] }}</span>
+              <span
+                v-if="t.restarts > 0"
+                class="pill pill-amber"
+                :title="`本会话已自动重连 ${t.restarts} 次`"
+                >重连 {{ t.restarts }}</span
+              >
             </span>
             <span class="col-name">
               <span class="tunnel-name">{{ t.name }}</span>
               <span v-if="!t.enabled" class="pill pill-muted">已禁用</span>
             </span>
-            <span class="col-pid mono">{{ t.pid ?? '-' }}</span>
+            <span class="col-pid mono">
+              {{ t.pid ?? '-' }}
+              <span v-if="uptime(t)" class="pid-uptime" :title="uptimeTitle(t)">{{
+                uptime(t)
+              }}</span>
+            </span>
             <span class="col-map mono">
               <span class="map-local">{{ t.local }}</span>
               <span class="map-arrow">→</span>

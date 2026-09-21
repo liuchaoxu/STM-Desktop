@@ -26,11 +26,12 @@ import { TunnelManager } from '../src/core/manager'
 import type { ConfigStore, SecretStore } from '../src/core/storage'
 import type {
   DescribeResult,
+  TransportExit,
   TransportSession,
   TunnelLogs,
   TunnelTransport
 } from '../src/core/transport'
-import type { ResolvedTunnel } from '../src/core/types'
+import type { ConfigData, ResolvedTunnel } from '../src/core/types'
 import { TunnelError } from '../src/core/types'
 import { assertConfigPayload, assertTarget } from '../src/main/ipc-guard'
 import { isAllowedExternalUrl, isInternalNavigation } from '../src/main/url-policy'
@@ -42,6 +43,8 @@ import {
   type BuiltCommand
 } from '../src/platforms/node'
 import { CHANNELS, TUNNEL_CHANGED } from '../src/shared/contract'
+import { mergeImport } from '../src/core/import-merge'
+import { importMRemoteNg, importPuttyRegistry, importSshConfig } from '../src/core/importers'
 
 // `npm run smoke` always runs from the package root.
 const PROJECT_ROOT = process.cwd()
@@ -51,6 +54,7 @@ const ORIGINAL_CONF = path.join(WORKSPACE, 'SSH-Tunnel-Manager', 'tunnel.conf')
 const PLINK = path.join(WORKSPACE, 'SSH-Tunnel-Manager', 'plink.exe')
 
 let failures = 0
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 function check(name: string, cond: boolean, detail?: string): void {
   if (cond) {
     console.log(`  PASS  ${name}`)
@@ -146,9 +150,24 @@ class FakeTransport implements TunnelTransport {
   readonly failing = new Set<string>()
   openedKeys: string[] = []
   closedKeys: string[] = []
+  /** Every `open()` call, including the ones that throw — i.e. real attempts. */
+  openAttempts = 0
 
   private nextPid = 4000
   private readonly sessions = new Map<string, { session: TransportSession; port: number }>()
+  /** Deaths the manager has not been told about yet (see `takeExits`). */
+  private readonly exits: TransportExit[] = []
+
+  /** Simulate a client dying on its own: the network dropped, the server hung up. */
+  die(key: string, code = 255): void {
+    const entry = this.sessions.get(key)
+    this.sessions.delete(key)
+    this.exits.push({ key, pid: entry?.session.pid ?? null, code })
+  }
+
+  takeExits(): TransportExit[] {
+    return this.exits.splice(0, this.exits.length)
+  }
 
   describe(t: ResolvedTunnel): DescribeResult {
     return { command: `in-process ${t.key}`, kind: 'in-process', executable: 'fake-transport' }
@@ -162,8 +181,13 @@ class FakeTransport implements TunnelTransport {
   }
 
   async open(t: ResolvedTunnel): Promise<TransportSession> {
+    this.openAttempts += 1
     if (this.failing.has(t.key)) throw new TunnelError(`[${t.key}] fake open failure`)
-    const session: TransportSession = { id: `sess-${this.nextPid}`, pid: this.nextPid++ }
+    const session: TransportSession = {
+      id: `sess-${this.nextPid}`,
+      pid: this.nextPid++,
+      startedAt: Date.now()
+    }
     this.sessions.set(t.key, { session, port: Number(t.values.local_port) })
     this.openedKeys.push(t.key)
     return session
@@ -437,6 +461,91 @@ async function main(): Promise<void> {
     openssh.command
   )
   check('openssh user@server', openssh.command.includes('alice@srv.example.com'), openssh.command)
+
+  // Forwarding shapes beyond a plain -L: SOCKS5, reverse tunnel, bastion.
+  const shapes = (body: string): string =>
+    new ExecTransport({
+      rootDir: tmp,
+      runtimeDir: path.join(tmp, '.tunnel-shapes'),
+      plinkCandidates: []
+    }).describe(
+      resolveTunnels(
+        parseConfig(`[tunnel:g:t]\nserver=srv.example.com\nusername=alice\n${body}\n`)
+      )[0]!
+    ).command
+
+  const dynamic = shapes('dynamic_port=1080')
+  check('socks5 uses -D', dynamic.includes('-D 127.0.0.1:1080'), dynamic)
+  check('socks5 needs no remote target', !dynamic.includes(' -L '), dynamic)
+
+  const reverse = shapes('remote_forward=8080:127.0.0.1:80')
+  check(
+    'reverse tunnel uses -R with an implicit bind',
+    reverse.includes('-R 127.0.0.1:8080:127.0.0.1:80'),
+    reverse
+  )
+
+  const jump = shapes(
+    'local_port=8080\nremote_host=127.0.0.1\nremote_port=80\nproxy_jump=deploy@bastion:22'
+  )
+  check('bastion uses -J', jump.includes('-J deploy@bastion:22'), jump)
+
+  const combined = shapes(
+    'local_port=8080\nremote_host=127.0.0.1\nremote_port=80\ndynamic_port=1080\n' +
+      'remote_forward=9000:127.0.0.1:90\nproxy_jump=bastion'
+  )
+  check(
+    'forwards combine on one client',
+    [
+      '-L 127.0.0.1:8080:127.0.0.1:80',
+      '-D 127.0.0.1:1080',
+      '-R 127.0.0.1:9000:127.0.0.1:90',
+      '-J bastion'
+    ].every((flag) => combined.includes(flag)),
+    combined
+  )
+
+  throws(
+    'bastion is rejected for plink',
+    () =>
+      new ExecTransport({
+        rootDir: tmp,
+        runtimeDir: path.join(tmp, '.tunnel-plink2'),
+        plinkCandidates: [PLINK]
+      }).describe(
+        resolveTunnels(
+          parseConfig(
+            `[tunnel:g:t]\nserver=s\nusername=u\nlocal_port=1\nremote_host=h\nremote_port=2\n` +
+              `proxy_jump=bastion\nclient=${PLINK.replace(/\\/g, '/')}\n`
+          )
+        )[0]!
+      ),
+    /proxy_jump requires the OpenSSH client/
+  )
+
+  // A tunnel that forwards nothing, or forwards something malformed, is a config
+  // error rather than a client that starts and does nothing.
+  throws(
+    'tunnel with no forward is rejected',
+    () => resolveTunnels(parseConfig('[tunnel:g:t]\nserver=s\nusername=u\n')),
+    /missing: one of/
+  )
+  throws(
+    'malformed remote_forward is rejected',
+    () =>
+      resolveTunnels(
+        parseConfig('[tunnel:g:t]\nserver=s\nusername=u\nremote_forward=8080:127.0.0.1\n')
+      ),
+    /remote_forward must be/
+  )
+  throws(
+    'proxy_jump without a host is rejected',
+    () =>
+      resolveTunnels(
+        parseConfig('[tunnel:g:t]\nserver=s\nusername=u\ndynamic_port=1080\nproxy_jump=user@\n')
+      ),
+    /proxy_jump has no host/
+  )
 
   // ---------------------------------------- Part C: core, zero OS dependency
   console.log('\n[C] platform-agnostic core (in-memory store + in-memory transport)')
@@ -1051,6 +1160,186 @@ async function main(): Promise<void> {
   const def = defaultConfig()
   check('default config has 2 tunnels', def.tunnels.length === 2, String(def.tunnels.length))
   check('default config resolves', resolveTunnels(def).length === 2)
+
+  // ------------------------------- Part J: auto-reconnect + connection stats
+  console.log('\n[J] auto-reconnect policy + connection stats')
+  {
+    const cfgWith = (extra: string): ConfigData =>
+      parseConfig(
+        `[group:g]\nserver=s\nusername=u\n${extra}\n` +
+          '[tunnel:g:t]\nlocal_port=1001\nremote_host=h\nremote_port=2\n'
+      )
+    const boot = async (
+      extra: string
+    ): Promise<{ manager: TunnelManager; fake: FakeTransport }> => {
+      const fake = new FakeTransport()
+      const manager = new TunnelManager({
+        store: new MemoryConfigStore(serializeConfig(cfgWith(extra))),
+        transport: fake
+      })
+      await manager.run('start', 'all')
+      return { manager, fake }
+    }
+
+    const { manager, fake } = await boot('restart_delay=0')
+    const started = (await manager.list())[0]!
+    check('a live session reports its start time', typeof started.startedAt === 'number')
+    check('no reconnect before anything died', started.restarts === 0)
+
+    fake.die('g/t')
+    await manager.reconcile()
+    await delay(60) // restart_delay=0 schedules on the next tick
+    const reconnected = (await manager.list())[0]!
+    check('a dropped tunnel is reconnected', reconnected.state === 'running', reconnected.state)
+    check('the reconnect is counted', reconnected.restarts === 1, String(reconnected.restarts))
+    check('reconnect refreshes the start time', reconnected.startedAt !== started.startedAt)
+
+    // A user stop must never be undone, however the tunnel died.
+    await manager.run('stop', 'all')
+    fake.die('g/t')
+    await manager.reconcile()
+    await delay(60)
+    check('a stopped tunnel stays stopped', (await manager.list())[0]!.state === 'stopped')
+
+    // auto_restart=false opts out entirely.
+    const off = await boot('restart_delay=0\nauto_restart=false')
+    off.fake.die('g/t')
+    await off.manager.reconcile()
+    await delay(60)
+    check('auto_restart=false is honoured', (await off.manager.list())[0]!.state === 'stopped')
+
+    // The attempt budget is spent, not infinite: with limit=1 and a client that
+    // cannot come back, the manager gives up instead of looping forever.
+    const bounded = await boot('restart_delay=0\nrestart_limit=1')
+    bounded.fake.failing.add('g/t')
+    const attemptsBefore = bounded.fake.openAttempts
+    bounded.fake.die('g/t')
+    await bounded.manager.reconcile()
+    await delay(60)
+    check(
+      'a failed reconnect spends the budget',
+      (await bounded.manager.list())[0]!.state === 'stopped'
+    )
+    check(
+      'one attempt is made for the first death',
+      bounded.fake.openAttempts === attemptsBefore + 1,
+      `${bounded.fake.openAttempts - attemptsBefore} attempts`
+    )
+    bounded.fake.die('g/t')
+    await bounded.manager.reconcile()
+    await delay(60)
+    check(
+      'the budget stops further attempts',
+      bounded.fake.openAttempts === attemptsBefore + 1,
+      `${bounded.fake.openAttempts - attemptsBefore} attempts`
+    )
+  }
+
+  // ------------------------------- Part K: importing from other tools
+  console.log('\n[K] import from other tools')
+  {
+    const current = parseConfig(
+      '[group:keep]\nserver=existing\nusername=u\n' +
+        '[tunnel:keep:t]\nlocal_port=1\nremote_host=h\nremote_port=2\n'
+    )
+
+    // A realistic OpenSSH snippet: two hosts sharing a pattern, one duplicate of an
+    // existing group, and a key that has to survive quoting.
+    const ssh = importSshConfig(
+      [
+        'Host keep',
+        '  HostName existing-changed.example.com',
+        '  User other',
+        '',
+        'Host web web-2',
+        '  HostName web.example.com',
+        '  User deploy',
+        '  Port 2222',
+        '  IdentityFile "C:\\keys\\my key"',
+        '  ProxyJump bastion.example.com',
+        '',
+        'Host *',
+        '  ServerAliveInterval 30'
+      ].join('\n')
+    )
+    check('ssh import finds the host blocks', ssh.tunnels.length >= 3, String(ssh.tunnels.length))
+    check(
+      'ssh import warns about the glob block',
+      ssh.warnings.length > 0,
+      ssh.warnings.join(' | ')
+    )
+
+    const merged = mergeImport(current, ssh)
+    check(
+      'import does not overwrite an existing group',
+      merged.config.groups.find((g) => g.name === 'keep')!.values.server === 'existing'
+    )
+    check('import adds new groups', merged.groups === 1, String(merged.groups))
+    check(
+      'the imported duplicate group is skipped, not merged',
+      merged.config.groups.filter((g) => g.name === 'keep').length === 1
+    )
+    check('nothing was skipped on the first pass', merged.skipped === 0, String(merged.skipped))
+    check(
+      'every imported tunnel starts disabled',
+      merged.config.tunnels
+        .filter((t) => t.group !== 'keep')
+        .every((t) => t.values.enabled === 'false')
+    )
+    check(
+      'imported tunnels keep their created group',
+      merged.config.tunnels.some((t) => t.group === 'web')
+    )
+    check(
+      'the merged config still parses and serializes',
+      parseConfig(serializeConfig(merged.config)).tunnels.length === merged.config.tunnels.length
+    )
+    check(
+      'importing twice adds nothing more',
+      mergeImport(merged.config, ssh).tunnels === 0 &&
+        mergeImport(merged.config, ssh).skipped === ssh.tunnels.length
+    )
+
+    // PuTTY and mRemoteNG go through the same merge.
+    const putty = importPuttyRegistry(
+      'Windows Registry Editor Version 5.00\r\n\r\n' +
+        '[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\My%20Server]\r\n' +
+        '"HostName"="putty.example.com"\r\n"UserName"="deploy"\r\n"PortNumber"=dword:00000016\r\n'
+    )
+    check('putty import produces a session', putty.groups.length === 1, String(putty.groups.length))
+    check(
+      'putty group carries the connection values',
+      putty.groups[0]!.values.server === 'putty.example.com' &&
+        putty.groups[0]!.values.server_port === '22'
+    )
+    check(
+      'putty import merges into the same config',
+      mergeImport(current, putty).config.groups.some((g) => g.values.server === 'putty.example.com')
+    )
+
+    const ng = importMRemoteNg(
+      '<Connections><Node Name="Prod" Type="Container">' +
+        '<Node Name="db" Hostname="db.example.com" Username="deploy" Port="2222" Protocol="SSH2"/>' +
+        '<Node Name="rdp" Hostname="win.example.com" Protocol="RDP"/>' +
+        '</Node></Connections>'
+    )
+    check(
+      'mremoteng imports the ssh child only',
+      ng.tunnels.length === 1,
+      String(ng.tunnels.length)
+    )
+    check(
+      'mremoteng reports the ignored protocol',
+      ng.warnings.some((warning) => warning.includes('RDP')),
+      ng.warnings.join(' | ')
+    )
+    check(
+      'mremoteng warns that the ports are missing',
+      ng.warnings.some((warning) => warning.includes('local_port')),
+      ng.warnings.join(' | ')
+    )
+    check('mremoteng keeps the container as a group', ng.groups[0]?.name === 'Prod')
+  }
 
   await fs.rm(tmp, { recursive: true, force: true })
   console.log(`\n${failures === 0 ? 'ALL PASSED' : `${failures} FAILURES`}`)

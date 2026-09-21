@@ -36,6 +36,47 @@ const WEB_FIELDS: OptionField[] = [
   }
 ]
 
+/**
+ * Forwarding shapes beyond the plain `-L` local forward: a SOCKS5 proxy, a reverse
+ * tunnel and a bastion. Each is optional and they combine, which is why they are
+ * separate keys rather than one "mode" switch.
+ */
+const FORWARD_FIELDS: OptionField[] = [
+  {
+    key: 'dynamic_port',
+    label: 'SOCKS5 端口',
+    kind: 'number',
+    placeholder: '1080',
+    hint: '填了就开一个 SOCKS5 代理（-D），不需要远端主机/端口'
+  },
+  {
+    key: 'remote_forward',
+    label: '反向隧道',
+    wide: true,
+    placeholder: '8080:127.0.0.1:80',
+    hint: 'ssh 的 -R 语法：[绑定地址:]远端端口:目标主机:目标端口'
+  },
+  {
+    key: 'proxy_jump',
+    label: '跳板机',
+    wide: true,
+    placeholder: 'deploy@bastion.example.com:22',
+    hint: 'ssh 的 -J，仅 OpenSSH 支持（plink 没有 -J）'
+  }
+]
+
+/** Keeping a tunnel alive: the app reconnects by itself, with an exponential backoff. */
+const RESTART_FIELDS: OptionField[] = [
+  {
+    key: 'auto_restart',
+    label: '断线自动重连',
+    kind: 'checkbox',
+    hint: '默认开启；只重连应用自己拉起的隧道，手动停止的不会复活'
+  },
+  { key: 'restart_limit', label: '最大重连次数', kind: 'number', placeholder: '5' },
+  { key: 'restart_delay', label: '首次重连等待（秒）', kind: 'number', placeholder: '2' }
+]
+
 export const DEFAULT_FIELDS: OptionField[] = [
   { key: 'client', label: 'SSH 客户端', placeholder: 'auto', list: 'client-options' },
   { key: 'server_port', label: 'SSH 端口', kind: 'number', placeholder: '22' },
@@ -47,6 +88,8 @@ export const DEFAULT_FIELDS: OptionField[] = [
     kind: 'select',
     options: HOST_KEY_CHECKING
   },
+  ...FORWARD_FIELDS,
+  ...RESTART_FIELDS,
   ...WEB_FIELDS
 ]
 
@@ -71,6 +114,8 @@ export const GROUP_FIELDS: OptionField[] = [
     options: HOST_KEY_CHECKING
   },
   { key: 'remote_host', label: '远端主机', placeholder: '127.0.0.1' },
+  ...FORWARD_FIELDS,
+  ...RESTART_FIELDS,
   ...WEB_FIELDS
 ]
 
@@ -96,5 +141,7 @@ export const TUNNEL_FIELDS: OptionField[] = [
     kind: 'select',
     options: HOST_KEY_CHECKING
   },
+  ...FORWARD_FIELDS,
+  ...RESTART_FIELDS,
   ...WEB_FIELDS
 ]

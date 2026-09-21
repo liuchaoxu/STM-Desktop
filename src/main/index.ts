@@ -5,8 +5,19 @@ import icon from '../../resources/icon.png?asset'
 import { createManager, registerIpc } from './ipc'
 import { hardenWebContents, SECURE_WEB_PREFERENCES } from './security'
 import { startStatusBroadcast } from './status'
+import {
+  closeHidesToTray,
+  createTray,
+  focusWindow,
+  startHidden,
+  syncAutostart,
+  type TrayHandle
+} from './tray'
 
-function createWindow(): void {
+/** Set while the app is on its way out, so the close handler stops hiding. */
+let quitting = false
+
+function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1180,
     height: 780,
@@ -23,7 +34,22 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    // Launched by the OS at login: the tunnels come up, the window stays away.
+    if (!startHidden()) mainWindow.show()
+  })
+
+  // Closing the window must not take the tunnel supervision with it; the tray menu
+  // owns "退出" (and `quitting` covers every other real exit path, e.g. app.quit()).
+  mainWindow.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    void closeHidesToTray().then((hide) => {
+      if (hide) mainWindow.hide()
+      else {
+        quitting = true
+        app.quit()
+      }
+    })
   })
 
   // Deny navigation, popups and permissions unless they belong to the app.
@@ -35,6 +61,8 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return mainWindow
 }
 
 /**
@@ -46,10 +74,11 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => {
+    // Someone launched the app again (or clicked a shortcut): show the window we
+    // already have instead of starting a second supervisor.
     const [existing] = BrowserWindow.getAllWindows()
-    if (!existing) return
-    if (existing.isMinimized()) existing.restore()
-    existing.focus()
+    if (existing) focusWindow(existing)
+    else createWindow()
   })
 
   app.whenReady().then(async () => {
@@ -67,16 +96,50 @@ if (!app.requestSingleInstanceLock()) {
 
     createWindow()
 
+    // The tray is what keeps the app alive once the window is closed, so it is
+    // created after the window exists (its menu shows/quits the app) and rebuilt
+    // whenever a preference changes.
+    await syncAutostart()
+    let tray: TrayHandle | null = null
+    try {
+      tray = await createTray({
+        manager,
+        showWindow: () => {
+          const [existing] = BrowserWindow.getAllWindows()
+          if (existing) focusWindow(existing)
+          else createWindow()
+        },
+        quit: () => {
+          quitting = true
+          app.quit()
+        }
+      })
+    } catch (error) {
+      // A tray is a convenience; a headless session (CI, some Linux desktops) must
+      // still be able to run the app.
+      console.error('tray unavailable', error)
+    }
+
     app.on('activate', function () {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      const [existing] = BrowserWindow.getAllWindows()
+      if (existing) focusWindow(existing)
+      else createWindow()
     })
 
-    app.on('before-quit', () => status.stop())
+    app.on('before-quit', () => {
+      quitting = true
+      status.stop()
+      tray?.destroy()
+    })
   })
 }
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // No window is not "no app": the tray (and the tunnels it supervises) stay until
+  // the user quits. macOS never quits here either, for the same reason plus its own
+  // conventions.
+  if (process.platform === 'darwin') return
+  void closeHidesToTray().then((hide) => {
+    if (!hide) app.quit()
+  })
 })
