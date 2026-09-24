@@ -9,6 +9,12 @@
 - 支持 Windows / macOS / Linux
 - 多组管理：`defaults → 组 → 隧道` 三级配置继承
 - 同时支持 OpenSSH 与 PuTTY Plink；Windows 密码认证开箱即用（内置 `plink.exe`）
+  ![隧道](resources/docs/隧道.png)
+  ![隧道2](resources/docs/隧道2.png)
+  ![配置0](resources/docs/配置0.png)
+  ![配置1](resources/docs/配置1.png)
+  ![配置3](resources/docs/配置3.png)
+  ![日志](resources/docs/日志.png)
 
 ## 功能特性
 

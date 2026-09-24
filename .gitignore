@@ -5,4 +5,4 @@ out-smoke.cjs
 .DS_Store
 .eslintcache
 *.log*
-docs
+./docs
