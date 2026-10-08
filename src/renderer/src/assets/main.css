@@ -116,10 +116,17 @@ body {
    animated gradient is not something utilities express well.
    `.chip` / `.meta-chip` are still here because other views use them too. */
 
+/*
+ * No top padding. A sticky child resolves `top: 0` against the scroll
+ * container's content box, so a top padding here is left *uncovered* above the
+ * sticky `.toolbar`: the page content scrolls through that band and shows as a
+ * slit between the header and the toolbar. The toolbar carries those 14px in
+ * its own padding instead, where its background covers them.
+ */
 .app-main {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px 24px;
+  padding: 0 16px 24px;
 }
 
 /* ---------------------------------------------------------------- chips */
@@ -366,9 +373,18 @@ body {
 
 /* ---------------------------------------------------------------- toolbar */
 
-/* Sticky action row: it must not scroll away with the page. The negative
-   margins cancel `.app-main`'s padding so the bar spans the full width, while
-   its own padding keeps the content aligned with the page. */
+/*
+ * Sticky action row: it must not scroll away with the page. The negative side
+ * margins cancel `.app-main`'s *horizontal* padding so the bar spans the full
+ * width, while its own padding keeps the content aligned with the page.
+ *
+ * There is deliberately no negative top margin (and no top padding on
+ * `.app-main`): the bar is butted straight against the header's bottom edge, so
+ * the two read as a single menu block and nothing can scroll through the seam.
+ * The 14px of breathing room above the buttons now comes from this bar's own
+ * padding — covered by its background — and `top: 0` keeps the bar in exactly
+ * that place at every scroll offset.
+ */
 .toolbar {
   position: sticky;
   top: 0;
@@ -377,11 +393,14 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: -14px -16px 14px;
+  margin: 0 -16px 14px;
   padding: 14px 16px 10px;
   flex-wrap: wrap;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(8px);
+  /* The header's own tone: its glass resolves to 80% `--bg-soft` over the page
+   * background. Painted opaque here (no `backdrop-filter`), so the bar is a
+   * continuation of the header rather than a pane the tunnel rows ghost
+   * through. Keep the two values in step if the header's tint ever changes. */
+  background: color-mix(in srgb, var(--bg-soft) 80%, var(--bg));
   border-bottom: 1px solid var(--border-soft);
 }
 
