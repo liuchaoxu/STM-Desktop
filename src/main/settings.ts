@@ -8,6 +8,7 @@
 import { app } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import type { UiPrefs } from '../shared/contract'
 
 export interface Settings {
   /** Config file the app was last pointed at. */
@@ -16,6 +17,30 @@ export interface Settings {
   openAtLogin?: boolean
   /** Closing the window keeps the app in the tray instead of quitting. */
   closeToTray?: boolean
+  /** Header: show the author badge in the top-right corner. Off unless asked. */
+  showAuthorInfo?: boolean
+  /** Header: show the GitHub project link in the top-right corner. On by default. */
+  showGithubLink?: boolean
+}
+
+/**
+ * What the header's top-right corner shows out of the box.
+ *
+ * The GitHub link is on — it is how someone finds the project and its issues —
+ * while the author badge is opt-in, so a first launch is about the tunnels and
+ * the toolbar stays quiet until the user asks for more.
+ */
+export const UI_PREF_DEFAULTS: UiPrefs = {
+  showAuthorInfo: false,
+  showGithubLink: true
+}
+
+/** The stored UI preferences with the defaults filled in for anything unset. */
+export function resolveUiPrefs(settings: Settings): UiPrefs {
+  return {
+    showAuthorInfo: settings.showAuthorInfo ?? UI_PREF_DEFAULTS.showAuthorInfo,
+    showGithubLink: settings.showGithubLink ?? UI_PREF_DEFAULTS.showGithubLink
+  }
 }
 
 function settingsFile(): string {

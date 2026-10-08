@@ -18,6 +18,7 @@ declare global {
   type ValidateItem = Contract.ValidateItem
   type LogPayload = Contract.LogPayload
   type AppInfo = Contract.AppInfo
+  type UiPrefs = Contract.UiPrefs
   type ConfigImportResult = Contract.ConfigImportResult
 
   interface Window {

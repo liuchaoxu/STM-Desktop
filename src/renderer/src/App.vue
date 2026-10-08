@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ToastHost from './components/ToastHost.vue'
 import AuthorLinks from './components/AuthorLinks.vue'
+import DisplaySettings from './components/DisplaySettings.vue'
 import LogoLoop from './components/bits/LogoLoop.vue'
 import type { LogoLoopItem } from './components/bits/LogoLoop.vue'
 import MetallicPaint from './components/bits/MetallicPaint.vue'
@@ -13,6 +14,7 @@ import ConfigView from './views/ConfigView.vue'
 import LogsView from './views/LogsView.vue'
 import { useTunnelStore } from './composables/useTunnelStore'
 import { useUi } from './composables/ui'
+import { loadUiPrefs, uiPrefs } from './composables/ui-prefs'
 
 const { busy, busyLabel, refresh, startLiveUpdates, stopLiveUpdates } = useTunnelStore()
 const { activeTab } = useUi()
@@ -113,6 +115,8 @@ onMounted(() => {
   void refresh()
   // The shell owns the refresh loop and pushes changes; this only subscribes.
   startLiveUpdates()
+  // Top-right display switches (author badge off, GitHub link on by default).
+  void loadUiPrefs()
   window.api.app
     .info()
     .then((i) => (info.value = i))
@@ -141,7 +145,7 @@ onUnmounted(() => {
     </div>
 
     <header
-      class="app-header relative flex items-center gap-4 border-b border-line bg-canvas-soft px-4 py-2.5"
+      class="app-header relative z-40 flex items-center gap-4 border-b border-line bg-canvas-soft px-4 py-2.5"
     >
       <MetallicPaint
         class="brand-mark block h-[26px] w-[34px] shrink-0"
@@ -194,7 +198,10 @@ onUnmounted(() => {
           aria-label="环境状态"
         />
       </div>
-      <AuthorLinks />
+      <!-- 右上角：作者信息 / GitHub 链接（由「页面显示设置」里的开关控制）+ 设置入口。
+           顺序固定为「内容在前、齿轮最后」，开关拨动时齿轮不会跟着左右跳。 -->
+      <AuthorLinks :show-author="uiPrefs.showAuthorInfo" :show-links="uiPrefs.showGithubLink" />
+      <DisplaySettings />
     </header>
 
     <main class="app-main">

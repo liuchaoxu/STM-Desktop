@@ -57,6 +57,10 @@ const api: StmApi = {
   },
   app: {
     info: () => invoke(CHANNELS.appInfo)
+  },
+  ui: {
+    getPrefs: () => invoke(CHANNELS.uiPrefsGet),
+    patchPrefs: (patch) => invoke(CHANNELS.uiPrefsPatch, patch)
   }
 }
 

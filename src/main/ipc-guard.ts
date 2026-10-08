@@ -11,6 +11,7 @@
  * at zero; the shapes are small enough that explicit checks are clearer.
  */
 import type { ConfigData, GroupConfig, TunnelDef } from '../core/types'
+import type { UiPrefs } from '../shared/contract'
 
 const MAX_TARGET_LENGTH = 256
 const MAX_SECTIONS = 500
@@ -110,4 +111,29 @@ export function assertConfigPayload(value: unknown): ConfigData {
     groups,
     tunnels
   }
+}
+
+/** The only keys the renderer may write into the header display preferences. */
+const UI_PREF_KEYS = ['showAuthorInfo', 'showGithubLink'] as const
+
+/**
+ * Validate a UI-preferences patch from the renderer.
+ *
+ * Keys are read off a whitelist and copied into a fresh object, so an unknown
+ * key (or a non-boolean) is rejected instead of being written into the shell's
+ * own `settings.json` alongside the config path and the login-item switches.
+ */
+export function assertUiPrefsPatch(value: unknown): Partial<UiPrefs> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('invalid ui prefs: expected an object')
+  }
+  const raw = value as Record<string, unknown>
+  const out: Partial<UiPrefs> = {}
+  for (const key of UI_PREF_KEYS) {
+    const next = raw[key]
+    if (next === undefined) continue
+    if (typeof next !== 'boolean') throw new Error(`invalid ui prefs: ${key} must be a boolean`)
+    out[key] = next
+  }
+  return out
 }

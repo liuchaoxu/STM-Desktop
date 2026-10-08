@@ -30,7 +30,9 @@ export const CHANNELS = {
   configSaveAs: 'config:save-as',
   configReveal: 'config:reveal',
   configReset: 'config:reset',
-  appInfo: 'app:info'
+  appInfo: 'app:info',
+  uiPrefsGet: 'ui:prefs:get',
+  uiPrefsPatch: 'ui:prefs:patch'
 } as const
 
 export type IpcChannel = (typeof CHANNELS)[keyof typeof CHANNELS]
@@ -48,6 +50,19 @@ export interface AppInfo {
   secretsEncrypted: boolean
   configPath: string
   runtimeDir: string
+}
+
+/**
+ * Header display preferences — the switches behind the top-right 设置 button.
+ *
+ * These are view state, not tunnelling configuration, so they live in the shell's
+ * own `settings.json` rather than in `tunnel.conf`.
+ */
+export interface UiPrefs {
+  /** The author badge next to the status marquee. Off by default. */
+  showAuthorInfo: boolean
+  /** The GitHub project link icon. On by default. */
+  showGithubLink: boolean
 }
 
 /** What an import actually added, plus the merged draft config. */
@@ -84,6 +99,8 @@ export interface IpcContract {
   [CHANNELS.configReveal]: { args: []; result: { path: string } }
   [CHANNELS.configReset]: { args: []; result: ConfigData }
   [CHANNELS.appInfo]: { args: []; result: AppInfo }
+  [CHANNELS.uiPrefsGet]: { args: []; result: UiPrefs }
+  [CHANNELS.uiPrefsPatch]: { args: [patch: Partial<UiPrefs>]; result: UiPrefs }
 }
 
 export type IpcArgs<K extends IpcChannel> = IpcContract[K]['args']
@@ -122,10 +139,18 @@ export interface AppApi {
   info(): Promise<AppInfo>
 }
 
+/** 顶部工具栏的显示偏好：作者信息 / GitHub 项目链接。 */
+export interface UiPrefsApi {
+  getPrefs(): Promise<UiPrefs>
+  /** Merge a patch in and return the stored result (defaults filled in). */
+  patchPrefs(patch: Partial<UiPrefs>): Promise<UiPrefs>
+}
+
 export interface StmApi {
   tunnel: TunnelApi
   config: ConfigApi
   app: AppApi
+  ui: UiPrefsApi
 }
 
 export type {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 /**
  * AuthorLinks — 顶部作者信息 + 可扩展链接组件。
  *
@@ -24,6 +26,11 @@
  *          url: '...' }
  *
  * 也可以不写死，通过 props 传入覆盖（见 App.vue 用法）。
+ *
+ * ── 显示与隐藏 ────────────────────────────────────────────────
+ * 作者署名与链接图标分别由 `showAuthor` / `showLinks` 控制：App.vue 把右上角
+ * 「页面显示设置」里的两个开关接在这两个 prop 上（作者信息默认不显示，
+ * GitHub 项目链接默认显示）。组件本身不读偏好，保持纯粹。
  * ──────────────────────────────────────────────────────────────
  */
 export interface AuthorLink {
@@ -53,10 +60,16 @@ const props = withDefaults(
     authorUrl?: string
     /** 链接列表（可覆盖） */
     links?: AuthorLink[]
+    /** 是否显示作者署名徽章（默认显示） */
+    showAuthor?: boolean
+    /** 是否显示链接图标（默认显示） */
+    showLinks?: boolean
   }>(),
   {
     author: 'liuchaoxu',
     authorUrl: 'https://github.com/liuchaoxu/STM-Desktop',
+    showAuthor: true,
+    showLinks: true,
     // ── 默认配置：在这里新增图标/链接 ─────────────────────────
     links: () => [
       {
@@ -86,6 +99,12 @@ function pathList(d: string | string[] | undefined): string[] {
   return Array.isArray(d) ? d : [d]
 }
 
+/**
+ * 隐藏时直接给空列表，而不是在 v-for 上再叠一个 v-if —— 同一元素上
+ * `v-if` 与 `v-for` 的优先级很容易读错，这里让模板只表达一件事。
+ */
+const visibleLinks = computed<AuthorLink[]>(() => (props.showLinks ? props.links : []))
+
 /** 通过 window.open 打开（Electron 主进程会转交给系统默认浏览器）。 */
 function open(url: string, newTab: boolean): void {
   window.open(url, newTab ? '_blank' : '_self', 'noopener,noreferrer')
@@ -95,6 +114,7 @@ function open(url: string, newTab: boolean): void {
 <template>
   <div class="author-links">
     <a
+      v-if="props.showAuthor"
       class="author-name"
       :href="props.authorUrl"
       :title="`作者：${props.author}`"
@@ -104,7 +124,7 @@ function open(url: string, newTab: boolean): void {
       <span class="author-text">{{ props.author }}</span>
     </a>
     <a
-      v-for="link in props.links"
+      v-for="link in visibleLinks"
       :key="link.key"
       class="author-link"
       :href="link.url"
@@ -148,7 +168,9 @@ function open(url: string, newTab: boolean): void {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .author-name:hover {
@@ -186,7 +208,10 @@ function open(url: string, newTab: boolean): void {
   font-size: 13px;
   cursor: pointer;
   text-decoration: none;
-  transition: color 0.15s, border-color 0.15s, transform 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
 }
 
 .author-link:hover {

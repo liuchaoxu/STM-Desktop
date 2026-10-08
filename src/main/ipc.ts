@@ -18,8 +18,8 @@ import type { TunnelManager } from '../core/manager'
 import { defaultConfig } from '../core/config'
 import { createTunnelManager, FileConfigStore } from '../platforms/node'
 import { CHANNELS, type IpcArgs, type IpcChannel, type IpcResult } from '../shared/contract'
-import { assertConfigPayload, assertTarget } from './ipc-guard'
-import { loadSettings, patchSettings } from './settings'
+import { assertConfigPayload, assertTarget, assertUiPrefsPatch } from './ipc-guard'
+import { loadSettings, patchSettings, resolveUiPrefs } from './settings'
 import { importConfigFromFile } from './config-import'
 import { ElectronSecretStore } from './secret-store'
 import type { StatusBroadcaster } from './status'
@@ -215,6 +215,15 @@ export async function registerIpc(
       configPath: manager.getConfigPath(),
       runtimeDir: path.join(app.getPath('userData'), '.tunnel')
     }
+  })
+
+  // ── 顶部工具栏的显示偏好（右上角作者信息 / GitHub 项目链接）──────────────
+  // 默认值在 `settings.ts`：作者信息默认关闭，GitHub 链接默认开启。
+  handle(CHANNELS.uiPrefsGet, async () => resolveUiPrefs(await loadSettings()))
+  handle(CHANNELS.uiPrefsPatch, async (patch) => {
+    // 只接受白名单里的布尔字段，其余内容不会落到 settings.json。
+    const stored = await patchSettings(assertUiPrefsPatch(patch))
+    return resolveUiPrefs(stored)
   })
 }
 

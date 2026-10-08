@@ -73,11 +73,13 @@ Windows 安装包为 **NSIS 向导式安装**（`dist/stm-desktop-1.0.0-setup.ex
 
 ## 界面操作指南
 
-顶部工具栏是一块**玻璃板**（半透明 + 背景模糊，背后的丝绸会透出来）：金属 **Stm** 字标、隧道 / 配置 / 日志 三个页签、状态跑马灯、右侧的作者链接（配置文件的路径现在显示在「配置」页顶部，不在工具栏里）。隧道页与配置页的动作按钮行**固定在页面顶部**，长列表里滚动时不会跟着走。
+顶部工具栏是一块**玻璃板**（半透明 + 背景模糊，背后的丝绸会透出来）：金属 **Stm** 字标、隧道 / 配置 / 日志 三个页签、状态跑马灯，最右侧是 **GitHub 项目链接**与 **⚙ 页面显示设置**按钮（配置文件的路径现在显示在「配置」页顶部，不在工具栏里）。隧道页与配置页的动作按钮行**固定在页面顶部**，长列表里滚动时不会跟着走。
 
 页签是镜面高光按钮（WebGL2）：指针靠近时，按钮边缘会沿圆角泛起一道跟随指针方向的高光；当前页以强调色底 + 强调色文字标示。左上角是金属渲染的 **Stm** 字标。
 
 页签右侧是一条**状态跑马灯**（LogoLoop）：SSH 可用性、Plink 来源、密码是否加密、当前平台（tooltip 里给出 Electron / Node / Chrome 版本）四个**毛玻璃芯片**（半透明 + 模糊 + 不定期扫过的高光）以约 26 px/s 缓慢横向漂移。整条流马灯的宽度**正好等于一份序列**，所以同一条状态不会在屏幕上同时出现两次；**指针移入即暂停**，方便看清某个状态；进行中的批量操作提示不会漂走，它固定在跑马灯左侧。
+
+⚙ **页面显示设置**：点右上角的齿轮弹出一个小面板（点面板外或按 `Esc` 关闭），控制右上角显示什么——**作者信息**（默认**不显示**）与 **GitHub 项目链接**（默认**显示**）。拨动开关即时生效，并写入 `<用户数据目录>/settings.json` 下次启动沿用；齿轮按钮本身始终在，所以把两项都关掉之后仍然找得到入口。
 
 页面顶部的动作按钮行是一个 **Dock**：指针扫过时，条目按距离用弹簧物理放大（悬停不会改变这一行的高度，因此不会推着页面上下跳）。隧道数 / 运行 / 连接中 / 启用等计数用 3D 挤出文字（DepthText）显示。
 
@@ -270,7 +272,7 @@ STM Desktop/
 │  │  ├─ ipc.ts                 # IPC 通道、对话框、路径持久化（契约类型化 handler）
 │  │  ├─ status.ts              # 状态循环：自动重连 + 投影 + 变更推送（仅窗口可见时运行）
 │  │  ├─ tray.ts                # 托盘、关窗隐藏、开机自启
-│  │  ├─ settings.ts            # 外壳自己的 settings.json（配置路径 / 自启 / 关窗行为）
+│  │  ├─ settings.ts            # 外壳自己的 settings.json（配置路径 / 自启 / 关窗行为 / 顶栏显示开关）
 │  │  ├─ config-import.ts       # 选文件、识别格式、确认、返回合并后的草稿
 │  │  ├─ security.ts            # 导航/弹窗/权限加固 + openExternal 白名单
 │  │  └─ secret-store.ts        # safeStorage → secrets.json
@@ -281,11 +283,11 @@ STM Desktop/
 │     └─ src/
 │        ├─ App.vue             # 布局：头部/页签/视图切换
 │        ├─ views/              # TunnelsView / ConfigView / LogsView
-│        ├─ components/         # KeyValueEditor / ToastHost
+│        ├─ components/         # KeyValueEditor / ToastHost / AuthorLinks / DisplaySettings（顶栏显示开关）
 │        │  ├─ bits/            # 动效与背景件：SpecularButton / Dock(+DockItem) / MetallicPaint / Silk / BorderGlow / LogoLoop / ElectricBorder / Counter(+CounterDigit) / AnimatedContent / RevealPanel
 │        │  │                    # 未使用（保留备查）：GooeyNav / SpotlightCard / ShinyText / CountUp / DepthText
 │        │  └─ config/          # 配置页卡片：SummaryCard / TunnelCard / OptionsEditor / GroupEditorModal
-│        ├─ composables/        # 状态订阅（主进程推送）+ 兜底轮询、Toast、页签共享状态
+│        ├─ composables/        # 状态订阅（主进程推送）+ 兜底轮询、Toast、页签共享状态、顶栏显示偏好
 │        └─ assets/main.css     # 深色主题样式 + 动效
 ├─ scripts/
 │  ├─ tunnel-smoke.ts           # 引擎冒烟测试（npm run smoke）
