@@ -69,6 +69,25 @@ onBeforeUnmount(() => {
       >
         <p class="ds-title">页面显示</p>
 
+        <label class="ds-row ds-theme-row">
+          <span class="ds-text"><span class="ds-label">外观</span></span>
+          <select
+            class="ds-select"
+            :value="uiPrefs.themeMode"
+            aria-label="外观模式"
+            @change="
+              setUiPref(
+                'themeMode',
+                ($event.target as HTMLSelectElement).value as UiPrefs['themeMode']
+              )
+            "
+          >
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
+
         <label class="ds-row">
           <span class="ds-text">
             <span class="ds-label">作者信息</span>
@@ -156,7 +175,7 @@ onBeforeUnmount(() => {
   /* 与工具栏同一块玻璃：背后的丝带透一点出来，但文字仍然清晰。 */
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 18px 40px var(--shadow-color);
 }
 
 .ds-title {
@@ -183,6 +202,17 @@ onBeforeUnmount(() => {
 
 .ds-row + .ds-row {
   margin-top: 2px;
+}
+
+.ds-select {
+  max-width: 112px;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .ds-text {

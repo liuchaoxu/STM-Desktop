@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ToastHost from './components/ToastHost.vue'
 import AuthorLinks from './components/AuthorLinks.vue'
 import DisplaySettings from './components/DisplaySettings.vue'
@@ -18,14 +18,42 @@ import { loadUiPrefs, uiPrefs } from './composables/ui-prefs'
 
 const { busy, busyLabel, refresh, startLiveUpdates, stopLiveUpdates } = useTunnelStore()
 const { activeTab } = useUi()
+const systemThemeDark = ref(window.matchMedia('(prefers-color-scheme: dark)').matches)
+const silkColor = computed(() => {
+  const isDark =
+    uiPrefs.value.themeMode === 'dark' ||
+    (uiPrefs.value.themeMode === 'system' && systemThemeDark.value)
+  return isDark ? '#16202e' : '#e8edf5'
+})
+const brandPalette = computed(() => {
+  const dark =
+    uiPrefs.value.themeMode === 'dark' ||
+    (uiPrefs.value.themeMode === 'system' && systemThemeDark.value)
+  return dark
+    ? { light: '#e6efff', dark: '#151b24', tint: '#ffffff' }
+    : { light: '#ffffff', dark: '#65758b', tint: '#9eb2ca' }
+})
+const colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+const onColorSchemeChange = (event: MediaQueryListEvent): void => {
+  systemThemeDark.value = event.matches
+}
+
+watch(
+  () => uiPrefs.value.themeMode,
+  (mode) => {
+    if (mode === 'system') document.documentElement.removeAttribute('data-theme')
+    else document.documentElement.dataset.theme = mode
+  },
+  { immediate: true }
+)
 
 const info = ref<AppInfo | null>(null)
 
 /** The wordmark is rasterized once, then painted by the metallic shader. */
 const brandImage = textToDataUrl('Stm', { fontSize: 120, fontWeight: 700, padding: 10 })
 
-/** Chips fade into the header's own background at the edges of the marquee. */
-const headerFade = 'var(--bg-soft)'
+/** The marquee fade uses the exact same surface as the translucent header. */
+const headerFade = 'var(--header-surface)'
 
 /** Status chips are plain markup, so they can be handed to the loop as nodes. */
 function statusChip(text: string, tone: string, title?: string): LogoLoopItem {
@@ -117,6 +145,7 @@ onMounted(() => {
   startLiveUpdates()
   // Top-right display switches (author badge off, GitHub link on by default).
   void loadUiPrefs()
+  colorSchemeQuery.addEventListener('change', onColorSchemeChange)
   window.api.app
     .info()
     .then((i) => (info.value = i))
@@ -125,6 +154,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopLiveUpdates()
+  colorSchemeQuery.removeEventListener('change', onColorSchemeChange)
 })
 </script>
 
@@ -136,7 +166,7 @@ onUnmounted(() => {
       <Silk
         :active="showBackdrop"
         class="h-full w-full"
-        color="#16202e"
+        :color="silkColor"
         :speed="3.5"
         :scale="1.6"
         :noise-intensity="1.1"
@@ -154,18 +184,18 @@ onUnmounted(() => {
         :iterations="140"
         :scale="3.4"
         :brightness="1.7"
-        :contrast="0.55"
-        :liquid="0.7"
+        :contrast="0.38"
+        :liquid="0.42"
         :speed="0.24"
         :refraction="0.012"
         :blur="0.02"
-        :chromatic-spread="1.5"
-        :distortion="0.85"
-        light-color="#e6efff"
-        dark-color="#151b24"
-        tint-color="#ffffff"
+        :chromatic-spread="0.55"
+        :distortion="0.38"
+        :light-color="brandPalette.light"
+        :dark-color="brandPalette.dark"
+        :tint-color="brandPalette.tint"
       />
-      <nav class="ml-auto flex items-center gap-1" aria-label="页面">
+      <nav class="app-nav ml-auto flex items-center gap-1" aria-label="页面">
         <SpecularButton
           v-for="(tab, index) in tabs"
           :key="tab.id"
@@ -173,6 +203,9 @@ onUnmounted(() => {
           :tint="activeTabIndex === index ? 'var(--accent)' : '#ffffff'"
           :tint-opacity="activeTabIndex === index ? 0.14 : 0"
           :text-color="activeTabIndex === index ? 'var(--accent)' : 'var(--muted)'"
+          line-color="var(--accent)"
+          base-color="var(--bg-soft)"
+          :intensity="0.42"
           :proximity="200"
           :shine-size="16"
           :shine-fade="34"
@@ -229,12 +262,12 @@ onUnmounted(() => {
     radial-gradient(
       120% 70% at 50% 0%,
       transparent 15%,
-      color-mix(in srgb, var(--bg) 55%, transparent)
+      color-mix(in srgb, var(--bg) 68%, transparent)
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--bg) 35%, transparent),
-      color-mix(in srgb, var(--bg) 75%, transparent)
+      color-mix(in srgb, var(--bg) 48%, transparent),
+      color-mix(in srgb, var(--bg) 82%, transparent)
     );
 }
 </style>

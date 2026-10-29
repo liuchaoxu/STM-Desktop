@@ -8,12 +8,15 @@ import Dock from '../components/bits/Dock.vue'
 import ElectricBorder from '../components/bits/ElectricBorder.vue'
 import type { DockItemData } from '../components/bits/DockItem.vue'
 
-const { tunnels, busy, execute, refresh } = useTunnelStore()
+const { tunnels, busy, loading, loadError, execute, refresh } = useTunnelStore()
 const { show, logTarget } = useUi()
 
 const validating = ref(false)
 const showValidate = ref(false)
 const validateItems = ref<ValidateItem[]>([])
+const searchQuery = ref('')
+const stateFilter = ref<'all' | TunnelView['state'] | 'enabled' | 'disabled'>('all')
+const searchInput = ref<HTMLInputElement | null>(null)
 
 /** Batch actions live in a Dock: items grow as the pointer sweeps across them. */
 const actionItems = computed<DockItemData[]>(() => [
@@ -49,14 +52,53 @@ const actionItems = computed<DockItemData[]>(() => [
  * number always matches the chip (12px) or pill (11.5px) it sits in.
  */
 
+const filteredTunnels = computed(() => {
+  const query = searchQuery.value.trim().toLocaleLowerCase()
+  return tunnels.value.filter((tunnel) => {
+    const matchesQuery =
+      !query ||
+      [tunnel.group, tunnel.name, tunnel.local, tunnel.remote, tunnel.key]
+        .join(' ')
+        .toLocaleLowerCase()
+        .includes(query)
+    const matchesState =
+      stateFilter.value === 'all'
+        ? true
+        : stateFilter.value === 'enabled'
+          ? tunnel.enabled
+          : stateFilter.value === 'disabled'
+            ? !tunnel.enabled
+            : tunnel.state === stateFilter.value
+    return matchesQuery && matchesState
+  })
+})
+
 const groups = computed(() => {
   const map = new Map<string, TunnelView[]>()
-  for (const t of tunnels.value) {
+  for (const t of filteredTunnels.value) {
     if (!map.has(t.group)) map.set(t.group, [])
     map.get(t.group)!.push(t)
   }
   return [...map.entries()].map(([name, items]) => ({ name, items }))
 })
+
+function onSearchKeydown(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null
+  const editing =
+    target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')
+  if (event.key === '/' && !editing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault()
+    searchInput.value?.focus()
+  } else if (event.key === 'Escape' && document.activeElement === searchInput.value) {
+    searchQuery.value = ''
+    searchInput.value?.blur()
+  }
+}
+
+function clearFilters(): void {
+  searchQuery.value = ''
+  stateFilter.value = 'all'
+}
 
 const summary = computed(() => {
   const all = tunnels.value
@@ -187,7 +229,10 @@ const stateLabel: Record<TunnelView['state'], string> = {
 
 onMounted(() => {
   void refresh()
+  document.addEventListener('keydown', onSearchKeydown)
 })
+
+onUnmounted(() => document.removeEventListener('keydown', onSearchKeydown))
 </script>
 
 <template>
@@ -195,9 +240,28 @@ onMounted(() => {
     <div class="toolbar">
       <div class="toolbar-left">
         <Dock :items="actionItems" />
+        <label class="tunnel-filter" aria-label="搜索隧道">
+          <span aria-hidden="true">⌕</span>
+          <input ref="searchInput" v-model="searchQuery" type="search" placeholder="搜索隧道…" />
+          <kbd>/</kbd>
+        </label>
+        <select
+          v-model="stateFilter"
+          class="input input-select tunnel-state-filter"
+          aria-label="按状态筛选"
+        >
+          <option value="all">全部状态</option>
+          <option value="running">运行中</option>
+          <option value="connecting">连接中</option>
+          <option value="stopped">已停止</option>
+          <option value="enabled">已启用</option>
+          <option value="disabled">已禁用</option>
+        </select>
       </div>
       <div class="toolbar-right">
-        <span class="meta-chip">共 <Counter :value="summary.total" /> 个隧道</span>
+        <span class="meta-chip">
+          显示 <Counter :value="filteredTunnels.length" /> / <Counter :value="summary.total" /> 个
+        </span>
         <span class="meta-chip meta-green">
           <Counter :value="summary.running" />
           运行
@@ -208,6 +272,11 @@ onMounted(() => {
         </span>
         <span class="meta-chip">启用 <Counter :value="summary.enabled" /></span>
       </div>
+    </div>
+
+    <div v-if="loadError" class="error-banner load-error">
+      <span>读取隧道失败：{{ loadError }}</span>
+      <button class="btn btn-sm" @click="refresh">重试</button>
     </div>
 
     <div v-if="showValidate" class="validate-panel">
@@ -227,11 +296,21 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="tunnels.length === 0 && !busy" class="empty">
+    <div v-if="tunnels.length === 0 && loading" class="empty">
+      <p class="muted">正在读取隧道…</p>
+    </div>
+
+    <div v-else-if="tunnels.length === 0" class="empty">
       <div class="empty-icon">🔌</div>
       <p>尚未配置任何隧道</p>
       <p class="muted">前往「配置」页添加隧道，或使用「打开配置…」导入已有的 tunnel.conf</p>
       <button class="btn btn-primary" @click="show('config')">去配置</button>
+    </div>
+
+    <div v-else-if="tunnels.length > 0 && groups.length === 0" class="empty empty-filtered">
+      <p>没有匹配的隧道</p>
+      <p class="muted">试试其他关键词或状态</p>
+      <button class="btn btn-ghost" @click="clearFilters">清除筛选</button>
     </div>
 
     <TransitionGroup v-else name="card" tag="div" class="groups">
@@ -251,7 +330,6 @@ onMounted(() => {
               groupServer(group.items)
             }}</span>
             <span class="pill pill-muted"><Counter :value="group.items.length" /> 个隧道</span>
-            >
           </div>
           <div class="group-actions">
             <button class="btn btn-sm" :disabled="busy" @click="execute('start', group.name)">

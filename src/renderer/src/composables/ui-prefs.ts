@@ -12,7 +12,8 @@ import { useToast } from './toast'
 /** 与主进程 `UI_PREF_DEFAULTS` 对齐：只有 GitHub 链接默认可见。 */
 const DEFAULTS: UiPrefs = {
   showAuthorInfo: false,
-  showGithubLink: true
+  showGithubLink: true,
+  themeMode: 'system'
 }
 
 export const uiPrefs = ref<UiPrefs>({ ...DEFAULTS })
@@ -39,7 +40,7 @@ let queue: Promise<unknown> = Promise.resolve()
  * 切换一个开关。镜像立即更新（开关不该有延迟感），写入排在队列后面；
  * 写盘失败则只回滚这一项，并提示用户这次改动没有保存。
  */
-export async function setUiPref(key: keyof UiPrefs, value: boolean): Promise<void> {
+export async function setUiPref<K extends keyof UiPrefs>(key: K, value: UiPrefs[K]): Promise<void> {
   const before = uiPrefs.value
   if (before[key] === value) return
 

@@ -114,7 +114,7 @@ export function assertConfigPayload(value: unknown): ConfigData {
 }
 
 /** The only keys the renderer may write into the header display preferences. */
-const UI_PREF_KEYS = ['showAuthorInfo', 'showGithubLink'] as const
+const UI_PREF_KEYS = ['showAuthorInfo', 'showGithubLink', 'themeMode'] as const
 
 /**
  * Validate a UI-preferences patch from the renderer.
@@ -132,8 +132,15 @@ export function assertUiPrefsPatch(value: unknown): Partial<UiPrefs> {
   for (const key of UI_PREF_KEYS) {
     const next = raw[key]
     if (next === undefined) continue
-    if (typeof next !== 'boolean') throw new Error(`invalid ui prefs: ${key} must be a boolean`)
-    out[key] = next
+    if (key === 'themeMode') {
+      if (next !== 'system' && next !== 'light' && next !== 'dark') {
+        throw new Error('invalid ui prefs: themeMode must be system, light, or dark')
+      }
+      out.themeMode = next
+    } else {
+      if (typeof next !== 'boolean') throw new Error(`invalid ui prefs: ${key} must be a boolean`)
+      out[key] = next
+    }
   }
   return out
 }

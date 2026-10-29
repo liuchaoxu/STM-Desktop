@@ -43,28 +43,31 @@
   --color-danger: var(--red);
   --color-danger-soft: var(--red-soft);
   --font-mono: var(--mono);
-  --radius-card: 10px;
+  --radius-card: 8px;
   --radius-control: 7px;
   --radius-pill: 999px;
 }
 
 :root {
-  --bg: #0e1013;
-  --bg-soft: #13161b;
-  --panel: #171b22;
-  --panel-2: #1d222b;
-  --border: #262c37;
-  --border-soft: #20252e;
-  --text: #e6e9ef;
-  --muted: #8b94a3;
-  --accent: #4f8cff;
-  --accent-soft: rgba(79, 140, 255, 0.15);
-  --green: #2fbf71;
-  --green-soft: rgba(47, 191, 113, 0.14);
-  --amber: #e8a13c;
-  --amber-soft: rgba(232, 161, 60, 0.14);
-  --red: #e5484d;
-  --red-soft: rgba(229, 72, 77, 0.14);
+  color-scheme: light;
+  --header-surface: color-mix(in srgb, var(--bg-soft) 88%, var(--bg));
+  --bg: #f5f5f7;
+  --bg-soft: #ebebed;
+  --panel: #ffffff;
+  --panel-2: #f2f2f7;
+  --border: #d8d8dc;
+  --border-soft: #e5e5e8;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --accent: #007aff;
+  --accent-soft: rgba(0, 122, 255, 0.12);
+  --green: #248a3d;
+  --green-soft: rgba(36, 138, 61, 0.12);
+  --amber: #a66300;
+  --amber-soft: rgba(166, 99, 0, 0.12);
+  --red: #d70015;
+  --red-soft: rgba(215, 0, 21, 0.1);
+  --shadow-color: rgba(0, 0, 0, 0.16);
   --mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace;
 
   /* GooeyNav particle palette. The gooey filter (`blur + contrast(100)` + a
@@ -74,6 +77,50 @@
   --color-2: #dce7ff;
   --color-3: #b9d0ff;
   --color-4: #f2f6ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg: #1c1c1e;
+    --bg-soft: #242426;
+    --panel: #2c2c2e;
+    --panel-2: #38383a;
+    --border: #48484a;
+    --border-soft: #38383a;
+    --text: #f5f5f7;
+    --muted: #a1a1a6;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.2);
+    --green: #30d158;
+    --green-soft: rgba(48, 209, 88, 0.16);
+    --amber: #ff9f0a;
+    --amber-soft: rgba(255, 159, 10, 0.16);
+    --red: #ff453a;
+    --red-soft: rgba(255, 69, 58, 0.16);
+    --shadow-color: rgba(0, 0, 0, 0.4);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1c1c1e;
+  --bg-soft: #242426;
+  --panel: #2c2c2e;
+  --panel-2: #38383a;
+  --border: #48484a;
+  --border-soft: #38383a;
+  --text: #f5f5f7;
+  --muted: #a1a1a6;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.2);
+  --green: #30d158;
+  --green-soft: rgba(48, 209, 88, 0.16);
+  --amber: #ff9f0a;
+  --amber-soft: rgba(255, 159, 10, 0.16);
+  --red: #ff453a;
+  --red-soft: rgba(255, 69, 58, 0.16);
+  --shadow-color: rgba(0, 0, 0, 0.4);
 }
 
 html,
@@ -179,19 +226,19 @@ body {
   overflow: hidden;
   border-radius: 999px;
   padding: 3px 10px;
-  border-color: color-mix(in srgb, #ffffff 16%, transparent);
+  border-color: color-mix(in srgb, var(--text) 12%, transparent);
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, #ffffff 12%, transparent),
-      color-mix(in srgb, #ffffff 3%, transparent)
+      color-mix(in srgb, var(--text) 6%, transparent),
+      color-mix(in srgb, var(--text) 2%, transparent)
     ),
-    color-mix(in srgb, var(--panel) 55%, transparent);
-  backdrop-filter: blur(8px) saturate(150%);
+    color-mix(in srgb, var(--panel) 82%, transparent);
+  backdrop-filter: blur(10px) saturate(125%);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #ffffff 20%, transparent),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
-    0 1px 5px rgba(0, 0, 0, 0.3);
+    inset 0 1px 0 color-mix(in srgb, var(--text) 14%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--text) 8%, transparent),
+    0 1px 5px var(--shadow-color);
 }
 
 /*
@@ -233,17 +280,17 @@ body {
 
 .meta-green {
   color: var(--green);
-  border-color: rgba(47, 191, 113, 0.35);
+  border-color: color-mix(in srgb, var(--green) 28%, transparent);
 }
 
 .meta-amber {
   color: var(--amber);
-  border-color: rgba(232, 161, 60, 0.35);
+  border-color: color-mix(in srgb, var(--amber) 30%, transparent);
 }
 
 .meta-red {
   color: var(--red);
-  border-color: rgba(229, 72, 77, 0.35);
+  border-color: color-mix(in srgb, var(--red) 28%, transparent);
 }
 
 .meta-muted {
@@ -316,7 +363,7 @@ body {
 }
 
 .btn:hover:not(:disabled) {
-  border-color: var(--muted);
+  border-color: color-mix(in srgb, var(--muted) 38%, transparent);
 }
 
 .btn:disabled {
@@ -347,7 +394,8 @@ body {
 
 .btn-ghost:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--border);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 .btn-danger {
@@ -412,12 +460,79 @@ body {
   flex-wrap: wrap;
 }
 
+.app-nav {
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 56%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 76%, var(--bg-soft));
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease;
+}
+
+.app-nav .specular-btn {
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    transform 150ms ease;
+}
+
+.app-nav .specular-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 5%, transparent) !important;
+}
+
+.app-nav .specular-btn[aria-current='page'] {
+  font-weight: 600;
+}
+
+.tunnel-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: min(230px, 32vw);
+  min-width: 150px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.tunnel-filter:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tunnel-filter input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.tunnel-filter kbd {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: 11px var(--mono);
+}
+
+.tunnel-state-filter {
+  min-height: 32px;
+}
+
 /* ---------------------------------------------------------------- cards */
 
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   margin-bottom: 14px;
   overflow: hidden;
 }
@@ -699,13 +814,20 @@ select.input option {
 
 .error-banner {
   background: var(--red-soft);
-  border: 1px solid rgba(229, 72, 77, 0.4);
+  border: 1px solid color-mix(in srgb, var(--red) 32%, transparent);
   color: var(--red);
   border-radius: 8px;
   padding: 9px 14px;
   margin-bottom: 14px;
   font-size: 13px;
   word-break: break-all;
+}
+
+.load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* `.group-editor` / `.tunnel-editor` are gone: the config page is now a card
@@ -854,7 +976,7 @@ select.input option {
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--text) 32%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -904,7 +1026,7 @@ select.input option {
   border-left-width: 3px;
   border-radius: 8px;
   padding: 10px 14px;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 22px var(--shadow-color);
   cursor: pointer;
   font-size: 13px;
 }
@@ -966,13 +1088,43 @@ select.input option {
     grid-template-columns: 1fr;
   }
 
-  .tunnel-row {
-    grid-template-columns: 90px minmax(110px, 1fr) 60px 1fr;
+  .tunnel-row:not(.tunnel-head) {
+    grid-template-columns: minmax(110px, 1fr) minmax(120px, 1.4fr);
+    gap: 8px;
   }
 
+  .tunnel-head {
+    display: none;
+  }
+
+  .col-status,
   .col-actions {
     grid-column: 1 / -1;
     justify-content: flex-start;
+  }
+
+  .group-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 600px) {
+  .toolbar-left,
+  .toolbar-right {
+    width: 100%;
+  }
+
+  .toolbar-left {
+    flex-wrap: wrap;
+  }
+
+  .tunnel-filter {
+    flex: 1;
+    width: auto;
+  }
+
+  .tunnel-row:not(.tunnel-head) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -996,7 +1148,11 @@ select.input option {
  * frost — without it their `backdrop-filter` would sample one flat colour.
  */
 .app-header {
-  background: color-mix(in srgb, var(--bg-soft) 80%, transparent);
+  background: var(--header-surface);
+  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease;
   /* Only the standard property: writing the `-webkit-` alias by hand makes the
    * build's minifier drop this one and keep the alias (see the roadmap note). */
   backdrop-filter: blur(14px) saturate(140%);
@@ -1020,9 +1176,13 @@ select.input option {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   background-size: 200% 100%;
-  opacity: 0.5;
+  opacity: 0.24;
   pointer-events: none;
   animation: header-sheen 7s linear infinite;
+}
+
+.app-header .glass-chip::after {
+  opacity: 0.22;
 }
 
 @keyframes header-sheen {
@@ -1198,6 +1358,10 @@ select.input option {
 
 .card-grid > .card {
   margin-bottom: 0;
+}
+
+.card-grid > .tunnel-card.is-open {
+  grid-column: 1 / -1;
 }
 
 /* Cards now own their surface through <BorderGlow> (background, border radius

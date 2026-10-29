@@ -494,7 +494,7 @@ function onLeave(): void {
 .logoloop-fade-right {
   top: 0;
   bottom: 0;
-  width: clamp(24px, 8%, 120px);
+  width: clamp(32px, 10%, 96px);
 }
 
 .logoloop-fade-left {

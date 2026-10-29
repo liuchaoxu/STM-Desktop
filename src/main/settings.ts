@@ -21,6 +21,7 @@ export interface Settings {
   showAuthorInfo?: boolean
   /** Header: show the GitHub project link in the top-right corner. On by default. */
   showGithubLink?: boolean
+  themeMode?: UiPrefs['themeMode']
 }
 
 /**
@@ -32,14 +33,16 @@ export interface Settings {
  */
 export const UI_PREF_DEFAULTS: UiPrefs = {
   showAuthorInfo: false,
-  showGithubLink: true
+  showGithubLink: true,
+  themeMode: 'system'
 }
 
 /** The stored UI preferences with the defaults filled in for anything unset. */
 export function resolveUiPrefs(settings: Settings): UiPrefs {
   return {
     showAuthorInfo: settings.showAuthorInfo ?? UI_PREF_DEFAULTS.showAuthorInfo,
-    showGithubLink: settings.showGithubLink ?? UI_PREF_DEFAULTS.showGithubLink
+    showGithubLink: settings.showGithubLink ?? UI_PREF_DEFAULTS.showGithubLink,
+    themeMode: settings.themeMode ?? UI_PREF_DEFAULTS.themeMode
   }
 }
 

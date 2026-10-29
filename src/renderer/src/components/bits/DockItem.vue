@@ -115,9 +115,9 @@ function activate(): void {
   justify-content: center;
   gap: 6px;
   flex: none;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--panel-2);
+  background: transparent;
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
@@ -137,7 +137,8 @@ function activate(): void {
 
 .dock-item:hover:not(:disabled),
 .dock-item-open:not(:disabled) {
-  border-color: var(--muted);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 6%, var(--panel-2));
 }
 
 .dock-item:focus-visible {

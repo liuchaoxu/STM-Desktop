@@ -106,9 +106,8 @@ function handleMouseLeave(): void {
   align-items: flex-start;
   width: fit-content;
   max-width: 100%;
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-  backdrop-filter: blur(6px);
+  background: transparent;
 }
 </style>

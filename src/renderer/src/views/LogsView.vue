@@ -26,8 +26,8 @@ const autoRefresh = ref(true)
 const autoScroll = ref(true)
 const fetching = ref(false)
 const lastError = ref('')
-const outBox = ref<HTMLElement | null>(null)
-const errBox = ref<HTMLElement | null>(null)
+const outBox = ref<HTMLElement[]>([])
+const errBox = ref<HTMLElement[]>([])
 
 const options = computed(() =>
   tunnels.value.map((t) => ({ key: t.key, label: `${t.group}/${t.name}` }))
@@ -42,6 +42,9 @@ const target = computed({
 
 const selected = computed(
   () => payloads.value.find((p) => p.key === target.value) ?? payloads.value[0] ?? null
+)
+const visiblePayloads = computed(() =>
+  target.value === 'all' ? payloads.value : selected.value ? [selected.value] : []
 )
 
 // Keep the selected target valid when the tunnel list changes.
@@ -86,8 +89,8 @@ function stopPolling(): void {
 function scrollIfNeeded(): void {
   if (!autoScroll.value) return
   void nextTick(() => {
-    if (outBox.value) outBox.value.scrollTop = outBox.value.scrollHeight
-    if (errBox.value) errBox.value.scrollTop = errBox.value.scrollHeight
+    for (const box of outBox.value) box.scrollTop = box.scrollHeight
+    for (const box of errBox.value) box.scrollTop = box.scrollHeight
   })
 }
 
@@ -106,6 +109,7 @@ onUnmounted(() => stopPolling())
     <div class="toolbar">
       <div class="toolbar-left">
         <select v-model="target" class="input input-select" @change="fetchLogs">
+          <option value="all">全部隧道</option>
           <option v-for="opt in options" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
         </select>
         <select v-model.number="lines" class="input input-select" @change="fetchLogs">
@@ -126,56 +130,60 @@ onUnmounted(() => stopPolling())
       </div>
       <div class="toolbar-right">
         <span
-          v-if="selected"
+          v-if="selected && target !== 'all'"
           class="meta-chip"
           :class="selected.running ? 'meta-green' : 'meta-muted'"
         >
           {{ selected.running ? '运行中' : '已停止' }}
         </span>
-        <span class="meta-chip mono">{{ selected?.outPath ?? '—' }}</span>
+        <span class="meta-chip mono">{{
+          target === 'all' ? '全部隧道' : (selected?.outPath ?? '—')
+        }}</span>
       </div>
     </div>
 
     <div v-if="lastError" class="error-banner">错误：{{ lastError }}</div>
-    <div v-if="!selected && !fetching" class="empty">
+    <div v-if="visiblePayloads.length === 0 && !fetching" class="empty">
       <div class="empty-icon">📄</div>
       <p>没有可查看的日志</p>
       <p class="muted">请先在「配置」页添加隧道</p>
     </div>
 
     <div v-else class="log-grid">
-      <section class="card log-card">
-        <header class="card-header">
-          <h2>
-            标准输出 <span class="hint mono">{{ selected?.outPath }}</span>
-          </h2>
-        </header>
-        <ElectricBorder
-          :active="Boolean(selected?.output)"
-          :color="fetching ? '#4f8cff' : '#2fbf71'"
-          :chaos="0.1"
-          :border-radius="10"
-          :max-samples="360"
-        >
-          <pre ref="outBox" class="log-box mono">{{ selected?.output }}</pre>
-        </ElectricBorder>
-      </section>
-      <section class="card log-card">
-        <header class="card-header">
-          <h2>
-            标准错误 <span class="hint mono">{{ selected?.errPath }}</span>
-          </h2>
-        </header>
-        <ElectricBorder
-          :active="Boolean(selected?.error)"
-          :color="fetching ? '#4f8cff' : '#e5484d'"
-          :chaos="0.1"
-          :border-radius="10"
-          :max-samples="360"
-        >
-          <pre ref="errBox" class="log-box mono log-box-err">{{ selected?.error }}</pre>
-        </ElectricBorder>
-      </section>
+      <template v-for="payload in visiblePayloads" :key="payload.key">
+        <section class="card log-card">
+          <header class="card-header">
+            <h2>
+              {{ payload.key }} · 标准输出 <span class="hint mono">{{ payload.outPath }}</span>
+            </h2>
+          </header>
+          <ElectricBorder
+            :active="Boolean(payload.output)"
+            :color="fetching ? '#4f8cff' : '#2fbf71'"
+            :chaos="0.1"
+            :border-radius="10"
+            :max-samples="360"
+          >
+            <pre ref="outBox" class="log-box mono">{{ payload.output }}</pre>
+          </ElectricBorder>
+        </section>
+        <section class="card log-card">
+          <header class="card-header">
+            <h2>
+              {{ payload.key }} · 标准错误 <span class="hint mono">{{ payload.errPath }}</span>
+            </h2>
+          </header>
+          <ElectricBorder
+            :active="Boolean(payload.error)"
+            :color="fetching ? '#4f8cff' : '#e5484d'"
+            :chaos="0.1"
+            :border-radius="10"
+            :max-samples="360"
+          >
+            <pre ref="errBox" class="log-box mono log-box-err">{{ payload.error }}</pre>
+          </ElectricBorder>
+        </section>
+      </template>
     </div>
   </div>
 </template>

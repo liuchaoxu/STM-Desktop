@@ -63,6 +63,8 @@ export interface UiPrefs {
   showAuthorInfo: boolean
   /** The GitHub project link icon. On by default. */
   showGithubLink: boolean
+  /** Appearance preference. System is the default. */
+  themeMode: 'system' | 'light' | 'dark'
 }
 
 /** What an import actually added, plus the merged draft config. */
