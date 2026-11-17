@@ -460,6 +460,79 @@ body {
   flex-wrap: wrap;
 }
 
+/* Configuration actions stay readable at narrow widths and wrap as a unit. */
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 78%, var(--bg-soft));
+}
+
+.config-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.config-action:hover:not(:disabled) {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.config-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.config-action:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+.config-action-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.config-action-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 88%, #fff);
+}
+
+.config-action-danger {
+  color: var(--red);
+}
+
+.config-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  font-size: 15px;
+  line-height: 1;
+}
+
 .app-nav {
   padding: 3px;
   border: 1px solid color-mix(in srgb, var(--border) 56%, transparent);

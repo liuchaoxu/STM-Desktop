@@ -27,6 +27,10 @@ export interface MergeOutcome {
  * group or an `all` target.
  */
 export function mergeImport(current: ConfigData, incoming: ImportResult): MergeOutcome {
+  const incomingDefaults = incoming.defaults ?? {}
+  const incomingGroupValues = new Map(
+    incoming.groups.map((group) => [group.name.toLowerCase(), group.values] as const)
+  )
   const groupNames = new Set(current.groups.map((group) => group.name.toLowerCase()))
   const tunnelKeys = new Set(
     current.tunnels.map((tunnel) => `${tunnel.group}/${tunnel.name}`.toLowerCase())
@@ -38,7 +42,7 @@ export function mergeImport(current: ConfigData, incoming: ImportResult): MergeO
     const name = group.name.toLowerCase()
     if (groupNames.has(name)) continue
     groupNames.add(name)
-    groups.push(group)
+    groups.push({ name: group.name, values: { ...incomingDefaults, ...group.values } })
     addedGroups++
   }
 
@@ -52,12 +56,19 @@ export function mergeImport(current: ConfigData, incoming: ImportResult): MergeO
       continue
     }
     tunnelKeys.add(key)
-    tunnels.push(tunnel)
+    // A duplicate group is intentionally left untouched, but a newly imported
+    // tunnel still needs the source group's connection values to be usable.
+    const groupValues = incomingGroupValues.get(tunnel.group.toLowerCase()) ?? {}
+    tunnels.push({
+      group: tunnel.group,
+      name: tunnel.name,
+      values: { ...incomingDefaults, ...groupValues, ...tunnel.values }
+    })
     addedTunnels++
   }
 
   return {
-    config: { defaults: current.defaults, groups, tunnels },
+    config: { defaults: { ...incomingDefaults, ...current.defaults }, groups, tunnels },
     groups: addedGroups,
     tunnels: addedTunnels,
     skipped

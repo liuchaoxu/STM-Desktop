@@ -20,11 +20,14 @@
  * tools, so unparsable input yields empty sections plus a warning.
  */
 import type { GroupConfig, TunnelDef } from './types'
+import { parseConfig } from './config'
 
 export interface ImportResult {
   groups: GroupConfig[]
   tunnels: TunnelDef[]
   warnings: string[]
+  /** Defaults from a native STM config, when the imported file has them. */
+  defaults?: Record<string, string>
 }
 
 // ------------------------------------------------------------------ shared
@@ -139,6 +142,33 @@ class ImportCollector {
 /** Shared tail of every importer: unusable input is a warning, never an error. */
 function failedImport(reason: string, prefix = '导入失败'): ImportResult {
   return { groups: [], tunnels: [], warnings: [`${prefix}：${reason}，本次未导入任何内容。`] }
+}
+
+/**
+ * Parses this app's own INI format when a user selects an existing `tunnel.conf`.
+ * Defaults are kept separately so the merge layer can apply them to newly added
+ * sections without replacing values already configured in the current file.
+ */
+export function importNativeConfig(text: string): ImportResult {
+  try {
+    const config = parseConfig(text)
+    return {
+      defaults: { ...config.defaults },
+      groups: config.groups.map((group) => ({
+        name: group.name,
+        values: { ...group.values }
+      })),
+      tunnels: config.tunnels.map((tunnel) => ({
+        group: tunnel.group,
+        name: tunnel.name,
+        values: { ...tunnel.values }
+      })),
+      warnings: []
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    return failedImport(reason, '无法导入 STM 配置')
+  }
 }
 
 /**

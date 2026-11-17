@@ -15,6 +15,7 @@ import * as os from 'os'
 import * as path from 'path'
 import {
   importMRemoteNg,
+  importNativeConfig,
   importPuttyRegistry,
   importSshConfig,
   type ImportResult
@@ -37,6 +38,9 @@ interface Parser {
  */
 function pickParser(filePath: string, text: string): Parser {
   const ext = path.extname(filePath).toLowerCase()
+  if (/^\s*\[(?:defaults|group\s*:|tunnel\s*:)/im.test(text)) {
+    return { source: 'STM 配置', parse: importNativeConfig }
+  }
   if (ext === '.reg') return { source: 'PuTTY 会话导出', parse: importPuttyRegistry }
   if (ext === '.xml') return { source: 'mRemoteNG', parse: importMRemoteNg }
   if (/^\s*Windows Registry Editor/i.test(text)) {
@@ -89,7 +93,9 @@ export async function importConfigFromFile(
   const detail = [
     `新增 ${merged.groups} 个组、${merged.tunnels} 条隧道` +
       (merged.skipped > 0 ? `，跳过 ${merged.skipped} 条已存在的隧道` : ''),
-    '导入的隧道默认停用，且需要你补全本地/远端端口。',
+    parser.source === 'STM 配置'
+      ? '源配置的默认值和隧道设置会一并导入。'
+      : '导入的隧道默认停用，且需要你补全本地/远端端口。',
     parsed.warnings.length > 0 ? `\n注意：\n· ${parsed.warnings.slice(0, 8).join('\n· ')}` : ''
   ].join('\n')
 

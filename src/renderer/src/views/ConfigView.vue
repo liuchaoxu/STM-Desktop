@@ -9,8 +9,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import AnimatedContent from '../components/bits/AnimatedContent.vue'
 import Counter from '../components/bits/Counter.vue'
-import Dock from '../components/bits/Dock.vue'
-import type { DockItemData } from '../components/bits/DockItem.vue'
 import GroupEditorModal from '../components/config/GroupEditorModal.vue'
 import OptionsEditor from '../components/config/OptionsEditor.vue'
 import SummaryCard from '../components/config/SummaryCard.vue'
@@ -21,23 +19,6 @@ import { useTunnelStore } from '../composables/useTunnelStore'
 
 const toast = useToast()
 const { tunnels: liveTunnels } = useTunnelStore()
-
-/** File operations live in a Dock; the label tracks the save state. */
-const actionItems = computed<DockItemData[]>(() => [
-  {
-    icon: '💾',
-    label: saving.value ? '保存中…' : dirty.value ? '保存配置' : '已保存',
-    tone: 'primary',
-    disabled: saving.value || !dirty.value,
-    onClick: () => void save()
-  },
-  { icon: '🔄', label: '重新加载', disabled: loading.value, onClick: reloadConfig },
-  { icon: '📥', label: '导入…', onClick: () => void importFrom() },
-  { icon: '📂', label: '打开配置…', onClick: () => void openConfig() },
-  { icon: '📤', label: '另存为…', onClick: () => void saveAs() },
-  { icon: '📁', label: '打开配置目录', onClick: () => void revealConfig() },
-  { icon: '♻️', label: '恢复默认模板', tone: 'danger', onClick: resetConfig }
-])
 
 /**
  * Counts roll with <Counter>, which sizes itself from the font it inherits, so a
@@ -480,7 +461,41 @@ onMounted(() => void load())
   <div class="view config-view">
     <div class="toolbar">
       <div class="toolbar-left">
-        <Dock :items="actionItems" />
+        <div class="config-actions" role="toolbar" aria-label="配置文件操作">
+          <button
+            class="config-action config-action-primary"
+            type="button"
+            :disabled="saving || !dirty"
+            @click="void save()"
+          >
+            <span class="config-action-icon" aria-hidden="true">💾</span>
+            <span>{{ saving ? '保存中…' : dirty ? '保存配置' : '已保存' }}</span>
+          </button>
+          <button class="config-action" type="button" :disabled="loading" @click="reloadConfig">
+            <span class="config-action-icon" aria-hidden="true">↻</span>
+            <span>重新加载</span>
+          </button>
+          <button class="config-action" type="button" @click="void importFrom()">
+            <span class="config-action-icon" aria-hidden="true">↓</span>
+            <span>导入</span>
+          </button>
+          <button class="config-action" type="button" @click="void openConfig()">
+            <span class="config-action-icon" aria-hidden="true">□</span>
+            <span>打开配置</span>
+          </button>
+          <button class="config-action" type="button" @click="void saveAs()">
+            <span class="config-action-icon" aria-hidden="true">↑</span>
+            <span>另存为</span>
+          </button>
+          <button class="config-action" type="button" @click="void revealConfig()">
+            <span class="config-action-icon" aria-hidden="true">⌂</span>
+            <span>配置目录</span>
+          </button>
+          <button class="config-action config-action-danger" type="button" @click="resetConfig">
+            <span class="config-action-icon" aria-hidden="true">↺</span>
+            <span>恢复默认</span>
+          </button>
+        </div>
       </div>
       <div class="toolbar-right">
         <span v-if="dirty" class="meta-chip meta-amber">有未保存的修改</span>
