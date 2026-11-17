@@ -549,6 +549,28 @@ async function openHistory(): Promise<void> {
   }
 }
 
+function askClearHistory(): void {
+  if (historyEntries.value.length === 0) return
+  askConfirm('确定清空当前配置的全部历史版本？此操作不可撤销。', () => {
+    void clearHistory()
+  })
+}
+
+async function clearHistory(): Promise<void> {
+  try {
+    cancelAutoSave()
+    if (dirty.value && !(await save())) {
+      scheduleAutoSave()
+      return
+    }
+    const result = await window.api.config.clearHistory()
+    historyEntries.value = []
+    toast.success(`已清理 ${result.cleared} 个历史版本`)
+  } catch (historyError) {
+    showError(historyError instanceof Error ? historyError.message : String(historyError))
+  }
+}
+
 function askRestoreHistory(entry: ConfigHistoryEntry): void {
   askConfirm(
     `恢复 ${formatHistoryDate(entry.savedAt)} 的配置版本？当前配置会先保留在历史记录中。`,
@@ -801,21 +823,51 @@ onUnmounted(cancelAutoSave)
         <div class="modal modal-wide">
           <header class="modal-head">
             <h2>历史版本</h2>
-            <button class="btn btn-icon" title="关闭" @click="historyOpen = false">✕</button>
+            <div class="history-head-actions">
+              <button
+                class="btn btn-sm btn-danger-ghost"
+                :disabled="historyEntries.length === 0"
+                @click="askClearHistory"
+              >
+                清空历史
+              </button>
+              <button class="btn btn-icon" title="关闭" @click="historyOpen = false">✕</button>
+            </div>
           </header>
-          <p class="modal-hint muted">最近保存的 5 个配置版本，恢复前会自动保留当前版本。</p>
+          <p class="modal-hint muted">
+            保存版本会持续保留，恢复前会自动保留当前配置。摘要只记录配置结构和选项名称，不显示密码内容。
+          </p>
           <div v-if="historyEntries.length === 0" class="muted history-empty">
             暂无历史版本
           </div>
           <div v-else class="history-list">
-            <div v-for="(entry, index) in historyEntries" :key="entry.id" class="history-row">
-              <div>
-                <strong>版本 {{ historyEntries.length - index }}</strong>
-                <span class="muted history-time">{{ formatHistoryDate(entry.savedAt) }}</span>
+            <div
+              v-for="(entry, index) in historyEntries"
+              :key="entry.id"
+              class="history-row"
+              :class="{ 'history-row-current': entry.isCurrent }"
+            >
+              <div class="history-main">
+                <div class="history-title-line">
+                  <strong>版本 {{ historyEntries.length - index }}</strong>
+                  <span v-if="entry.isCurrent" class="pill pill-green">当前使用</span>
+                  <span class="muted history-time">{{ formatHistoryDate(entry.savedAt) }}</span>
+                </div>
+                <div class="history-summary">{{ entry.summary }}</div>
+                <details v-if="entry.changes.length > 0" class="history-changes">
+                  <summary>查看变更（{{ entry.changes.length }} 项）</summary>
+                  <ul>
+                    <li v-for="change in entry.changes" :key="change">{{ change }}</li>
+                  </ul>
+                </details>
               </div>
-              <button class="btn btn-sm" @click="askRestoreHistory(entry)">
+              <button
+                class="btn btn-sm"
+                :disabled="entry.isCurrent"
+                @click="askRestoreHistory(entry)"
+              >
                 <span aria-hidden="true">↶</span>
-                恢复
+                {{ entry.isCurrent ? '当前版本' : '恢复' }}
               </button>
             </div>
           </div>

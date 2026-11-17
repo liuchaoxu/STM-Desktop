@@ -915,7 +915,10 @@ async function main(): Promise<void> {
         'configOpen',
         'configSaveAs',
         'configReveal',
-        'configReset'
+        'configReset',
+        'configHistory',
+        'configHistoryClear',
+        'configHistoryRestore'
       ].every((key) => key in CHANNELS)
     )
 

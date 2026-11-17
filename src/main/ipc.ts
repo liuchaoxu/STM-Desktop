@@ -25,9 +25,11 @@ import { importConfigFromFile } from './config-import'
 import { ElectronSecretStore } from './secret-store'
 import type { StatusBroadcaster } from './status'
 import {
+  clearConfigHistory,
   listConfigHistory,
   readConfigHistory,
-  recordConfigHistory
+  recordConfigHistory,
+  summarizeConfigChange
 } from './config-history'
 
 /**
@@ -104,8 +106,11 @@ export async function registerIpc(
   async function recordHistory(before: string, after: string): Promise<void> {
     try {
       const configPath = manager.getConfigPath()
-      await recordConfigHistory(configPath, before)
-      await recordConfigHistory(configPath, after)
+      await recordConfigHistory(configPath, before, {
+        summary: '保存前配置版本',
+        changes: []
+      })
+      await recordConfigHistory(configPath, after, summarizeConfigChange(before, after))
     } catch (error) {
       // History is a convenience layer; a read-only sidecar must not make a
       // successful config save fail.
@@ -222,7 +227,13 @@ export async function registerIpc(
     announce()
     return cfg
   })
-  handle(CHANNELS.configHistory, () => listConfigHistory(manager.getConfigPath()))
+  handle(CHANNELS.configHistory, async () => {
+    const current = await manager.historyConfig()
+    return listConfigHistory(manager.getConfigPath(), current)
+  })
+  handle(CHANNELS.configHistoryClear, async () => ({
+    cleared: await clearConfigHistory(manager.getConfigPath())
+  }))
   handle(CHANNELS.configHistoryRestore, async (id) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('invalid history id')
     const text = await readConfigHistory(manager.getConfigPath(), id)

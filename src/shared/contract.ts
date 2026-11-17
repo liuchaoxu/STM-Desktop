@@ -31,6 +31,7 @@ export const CHANNELS = {
   configReveal: 'config:reveal',
   configReset: 'config:reset',
   configHistory: 'config:history',
+  configHistoryClear: 'config:history:clear',
   configHistoryRestore: 'config:history:restore',
   appInfo: 'app:info',
   uiPrefsGet: 'ui:prefs:get',
@@ -84,6 +85,9 @@ export interface ConfigImportResult {
 export interface ConfigHistoryEntry {
   id: string
   savedAt: string
+  summary: string
+  changes: string[]
+  isCurrent: boolean
 }
 
 /**
@@ -108,6 +112,7 @@ export interface IpcContract {
   [CHANNELS.configReveal]: { args: []; result: { path: string } }
   [CHANNELS.configReset]: { args: []; result: ConfigData }
   [CHANNELS.configHistory]: { args: []; result: ConfigHistoryEntry[] }
+  [CHANNELS.configHistoryClear]: { args: []; result: { cleared: number } }
   [CHANNELS.configHistoryRestore]: { args: [id: string]; result: ConfigData }
   [CHANNELS.appInfo]: { args: []; result: AppInfo }
   [CHANNELS.uiPrefsGet]: { args: []; result: UiPrefs }
@@ -145,6 +150,7 @@ export interface ConfigApi {
   reveal(): Promise<{ path: string }>
   reset(): Promise<ConfigData>
   history(): Promise<ConfigHistoryEntry[]>
+  clearHistory(): Promise<{ cleared: number }>
   restoreHistory(id: string): Promise<ConfigData>
 }
 

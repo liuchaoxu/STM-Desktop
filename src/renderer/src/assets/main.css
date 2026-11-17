@@ -1632,6 +1632,12 @@ select.input option {
   font-weight: 700;
 }
 
+.history-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .modal-hint {
   font-size: 12.5px;
   line-height: 1.6;
@@ -1663,9 +1669,49 @@ select.input option {
   background: var(--panel-2);
 }
 
-.history-time {
-  margin-left: 10px;
+.history-row-current {
+  border-color: color-mix(in srgb, var(--green) 42%, var(--border));
+  background: color-mix(in srgb, var(--green-soft) 35%, var(--panel-2));
+}
+
+.history-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-summary {
+  margin-top: 4px;
+  color: var(--muted);
   font-size: 12px;
+  line-height: 1.5;
+}
+
+.history-time {
+  font-size: 12px;
+}
+
+.history-changes {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.history-changes summary {
+  cursor: pointer;
+}
+
+.history-changes ul {
+  display: grid;
+  gap: 2px;
+  margin: 5px 0 0;
+  padding-left: 18px;
 }
 
 .history-empty {

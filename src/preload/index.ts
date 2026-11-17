@@ -55,6 +55,7 @@ const api: StmApi = {
     reveal: () => invoke(CHANNELS.configReveal),
     reset: () => invoke(CHANNELS.configReset),
     history: () => invoke(CHANNELS.configHistory),
+    clearHistory: () => invoke(CHANNELS.configHistoryClear),
     restoreHistory: (id) => invoke(CHANNELS.configHistoryRestore, id)
   },
   app: {
