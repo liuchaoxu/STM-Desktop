@@ -510,16 +510,6 @@ body {
   cursor: not-allowed;
 }
 
-.config-action-primary {
-  background: var(--accent);
-  color: #fff;
-}
-
-.config-action-primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 88%, #fff);
-}
-
 .config-action-danger {
   color: var(--red);
 }
@@ -1654,6 +1644,33 @@ select.input option {
 
 .modal-wide .modal-actions {
   margin-top: 18px;
+}
+
+.history-list {
+  display: grid;
+  gap: 6px;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.history-time {
+  margin-left: 10px;
+  font-size: 12px;
+}
+
+.history-empty {
+  padding: 16px 0 8px;
+  text-align: center;
 }
 
 /* --------------------------------------------------------- config: motion */

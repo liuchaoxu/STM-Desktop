@@ -239,6 +239,19 @@ export class TunnelManager {
   }
 
   /**
+   * Snapshot for local version history. Encrypted stores keep the reference but
+   * never write the plaintext password; without an encrypted store the existing
+   * config format necessarily keeps the password in the snapshot as well.
+   */
+  async historyConfig(): Promise<string> {
+    const cfg = cloneConfig(await this.getConfig())
+    if (this.canEncryptSecrets()) {
+      for (const section of sectionsOf(cfg)) delete section.values.password
+    }
+    return serializeConfig(cfg)
+  }
+
+  /**
    * Fill in passwords that live in the secret store, so the rest of the core
    * (and the UI) only ever deals with `values.password`.
    */

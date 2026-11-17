@@ -20,6 +20,7 @@ declare global {
   type AppInfo = Contract.AppInfo
   type UiPrefs = Contract.UiPrefs
   type ConfigImportResult = Contract.ConfigImportResult
+  type ConfigHistoryEntry = Contract.ConfigHistoryEntry
 
   interface Window {
     api: Contract.StmApi

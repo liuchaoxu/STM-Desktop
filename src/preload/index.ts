@@ -53,7 +53,9 @@ const api: StmApi = {
     importFrom: () => invoke(CHANNELS.configImport),
     saveAs: () => invoke(CHANNELS.configSaveAs),
     reveal: () => invoke(CHANNELS.configReveal),
-    reset: () => invoke(CHANNELS.configReset)
+    reset: () => invoke(CHANNELS.configReset),
+    history: () => invoke(CHANNELS.configHistory),
+    restoreHistory: (id) => invoke(CHANNELS.configHistoryRestore, id)
   },
   app: {
     info: () => invoke(CHANNELS.appInfo)

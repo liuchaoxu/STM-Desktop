@@ -30,6 +30,8 @@ export const CHANNELS = {
   configSaveAs: 'config:save-as',
   configReveal: 'config:reveal',
   configReset: 'config:reset',
+  configHistory: 'config:history',
+  configHistoryRestore: 'config:history:restore',
   appInfo: 'app:info',
   uiPrefsGet: 'ui:prefs:get',
   uiPrefsPatch: 'ui:prefs:patch'
@@ -79,6 +81,11 @@ export interface ConfigImportResult {
   config: ConfigData
 }
 
+export interface ConfigHistoryEntry {
+  id: string
+  savedAt: string
+}
+
 /**
  * Arguments and result per channel. Both sides are generic over this, so whichever
  * side drifts fails to compile.
@@ -100,6 +107,8 @@ export interface IpcContract {
   [CHANNELS.configSaveAs]: { args: []; result: { path: string } | null }
   [CHANNELS.configReveal]: { args: []; result: { path: string } }
   [CHANNELS.configReset]: { args: []; result: ConfigData }
+  [CHANNELS.configHistory]: { args: []; result: ConfigHistoryEntry[] }
+  [CHANNELS.configHistoryRestore]: { args: [id: string]; result: ConfigData }
   [CHANNELS.appInfo]: { args: []; result: AppInfo }
   [CHANNELS.uiPrefsGet]: { args: []; result: UiPrefs }
   [CHANNELS.uiPrefsPatch]: { args: [patch: Partial<UiPrefs>]; result: UiPrefs }
@@ -135,6 +144,8 @@ export interface ConfigApi {
   saveAs(): Promise<{ path: string } | null>
   reveal(): Promise<{ path: string }>
   reset(): Promise<ConfigData>
+  history(): Promise<ConfigHistoryEntry[]>
+  restoreHistory(id: string): Promise<ConfigData>
 }
 
 export interface AppApi {

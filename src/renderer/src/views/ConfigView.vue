@@ -3,10 +3,10 @@
  * Config page: an overview of cards (defaults + one card per group), drilling
  * into a group to edit its tunnels as individual cards.
  *
- * The page owns the draft config and all mutations; the cards are presentational
- * (see components/config/). Nothing is written to disk until 保存配置.
+ * The page owns the draft config and all mutations; valid edits are persisted
+ * automatically after a short debounce (see components/config/ for the cards).
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import AnimatedContent from '../components/bits/AnimatedContent.vue'
 import Counter from '../components/bits/Counter.vue'
 import GroupEditorModal from '../components/config/GroupEditorModal.vue'
@@ -43,6 +43,13 @@ const error = ref('')
 const saving = ref(false)
 const loading = ref(false)
 const confirmState = ref<{ message: string; onOk: () => void } | null>(null)
+const historyOpen = ref(false)
+const historyLoading = ref(false)
+const historyEntries = ref<ConfigHistoryEntry[]>([])
+
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let autoSaveQueued = false
+let skipNextAutoSave = false
 
 const activeView = ref<View>({ kind: 'overview' })
 const direction = ref<'forward' | 'back'>('forward')
@@ -198,27 +205,68 @@ async function load(): Promise<void> {
   }
 }
 
-async function save(): Promise<void> {
-  if (saving.value) return
+async function save(notify = false): Promise<boolean> {
+  if (saving.value) {
+    autoSaveQueued = true
+    return false
+  }
   // quick client-side sanity checks before hitting the backend
   for (const tunnel of cfg.value.tunnels) {
-    if (!tunnel.name.trim()) return showError('隧道名称不能为空')
-    if (!tunnel.group.trim()) return showError(`隧道 ${tunnel.name} 的组不能为空`)
+    if (!tunnel.name.trim()) {
+      showError('隧道名称不能为空')
+      return false
+    }
+    if (!tunnel.group.trim()) {
+      showError(`隧道 ${tunnel.name} 的组不能为空`)
+      return false
+    }
   }
   for (const group of cfg.value.groups) {
-    if (!group.name.trim()) return showError('组名不能为空')
+    if (!group.name.trim()) {
+      showError('组名不能为空')
+      return false
+    }
   }
+  const draft = toPlain(cfg.value)
+  const draftSnapshot = JSON.stringify(draft)
   saving.value = true
   error.value = ''
   try {
-    const saved = await window.api.config.save(toPlain(cfg.value))
+    const saved = await window.api.config.save(draft)
     snapshot.value = JSON.stringify(saved)
-    toast.success('配置已保存')
+    if (notify) toast.success('配置已自动保存')
+    return true
   } catch (saveError) {
     showError(saveError instanceof Error ? saveError.message : String(saveError))
+    return false
   } finally {
     saving.value = false
+    if (autoSaveQueued) {
+      autoSaveQueued = false
+      scheduleAutoSave()
+    } else if (JSON.stringify(cfg.value) !== draftSnapshot) {
+      scheduleAutoSave()
+    }
   }
+}
+
+function scheduleAutoSave(): void {
+  if (!dirty.value || loading.value) return
+  if (saving.value) {
+    autoSaveQueued = true
+    return
+  }
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    void save()
+  }, 500)
+}
+
+function cancelAutoSave(): void {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = null
+  autoSaveQueued = false
 }
 
 function showError(message: string): void {
@@ -274,8 +322,14 @@ function commitGroupEditor(draft: GroupConfig): void {
   if (editor.original) {
     // Mutate in place: the tunnel-rename watcher below tracks group names by
     // position, so replacing the object would detach its tunnels.
+    const before = editor.original.name
     editor.original.name = name
     editor.original.values = draft.values
+    if (before !== name) {
+      for (const tunnel of cfg.value.tunnels) {
+        if (tunnel.group === before) tunnel.group = name
+      }
+    }
     const view = activeView.value
     if (view.kind === 'group' && view.name === editor.name) {
       activeView.value = { kind: 'group', name }
@@ -284,6 +338,7 @@ function commitGroupEditor(draft: GroupConfig): void {
     cfg.value.groups.push({ name, values: draft.values })
   }
   groupEditor.value = null
+  void save(true)
 }
 
 function removeGroup(entry: GroupEntry | null): void {
@@ -362,6 +417,18 @@ watch(
   }
 )
 
+watch(
+  cfg,
+  () => {
+    if (skipNextAutoSave) {
+      skipNextAutoSave = false
+      return
+    }
+    scheduleAutoSave()
+  },
+  { deep: true }
+)
+
 // Recover when the section being viewed disappears (reload, reset, delete).
 watch(groupEntries, (entries) => {
   const view = activeView.value
@@ -381,28 +448,42 @@ watch(groupEntries, (entries) => {
  */
 async function importFrom(): Promise<void> {
   try {
+    cancelAutoSave()
     const result = await window.api.config.importFrom()
-    if (!result) return
+    if (!result) {
+      scheduleAutoSave()
+      return
+    }
+    // Foreign imports may intentionally contain incomplete tunnels; wait until
+    // the user finishes those fields before the automatic saver runs. Native
+    // STM configs are complete and can be persisted immediately.
+    const needsReview = result.source !== 'STM 配置'
+    skipNextAutoSave = needsReview
     cfg.value = result.config
     error.value = ''
     goTo({ kind: 'overview' }, 'back')
     toast.success(
       `已导入 ${result.groups} 个组、${result.tunnels} 条隧道` +
         (result.skipped > 0 ? `（跳过 ${result.skipped} 条重复）` : '') +
-        '，请补全端口后保存'
+        (needsReview ? '，补全端口后会自动保存' : '，已自动保存')
     )
     if (result.warnings.length > 0) {
       toast.info(result.warnings.slice(0, 3).join('；'))
     }
   } catch (importError) {
     showError(importError instanceof Error ? importError.message : String(importError))
+    scheduleAutoSave()
   }
 }
 
 async function openConfig(): Promise<void> {
   try {
+    cancelAutoSave()
     const result = await window.api.config.open()
-    if (!result) return
+    if (!result) {
+      scheduleAutoSave()
+      return
+    }
     cfg.value = result.config
     snapshot.value = JSON.stringify(result.config)
     configPath.value = result.path
@@ -411,6 +492,7 @@ async function openConfig(): Promise<void> {
     toast.success(`已切换到配置文件：${result.path}`)
   } catch (openError) {
     showError(openError instanceof Error ? openError.message : String(openError))
+    scheduleAutoSave()
   }
 }
 
@@ -434,6 +516,7 @@ async function revealConfig(): Promise<void> {
 function resetConfig(): void {
   askConfirm('确定恢复为默认配置模板？当前配置将被覆盖。', async () => {
     try {
+      cancelAutoSave()
       const data = await window.api.config.reset()
       cfg.value = data
       snapshot.value = JSON.stringify(data)
@@ -442,19 +525,68 @@ function resetConfig(): void {
       toast.success('已恢复默认配置')
     } catch (resetError) {
       showError(resetError instanceof Error ? resetError.message : String(resetError))
+      scheduleAutoSave()
     }
   })
 }
 
+function formatHistoryDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+async function openHistory(): Promise<void> {
+  historyLoading.value = true
+  try {
+    historyEntries.value = await window.api.config.history()
+    historyOpen.value = true
+    if (historyEntries.value.length === 0) toast.info('还没有可恢复的历史版本')
+  } catch (historyError) {
+    showError(historyError instanceof Error ? historyError.message : String(historyError))
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function askRestoreHistory(entry: ConfigHistoryEntry): void {
+  askConfirm(
+    `恢复 ${formatHistoryDate(entry.savedAt)} 的配置版本？当前配置会先保留在历史记录中。`,
+    () => {
+      void restoreHistory(entry)
+    }
+  )
+}
+
+async function restoreHistory(entry: ConfigHistoryEntry): Promise<void> {
+  try {
+    cancelAutoSave()
+    const restored = await window.api.config.restoreHistory(entry.id)
+    cfg.value = restored
+    snapshot.value = JSON.stringify(restored)
+    error.value = ''
+    historyOpen.value = false
+    goTo({ kind: 'overview' }, 'back')
+    toast.success('历史版本已恢复')
+  } catch (historyError) {
+    showError(historyError instanceof Error ? historyError.message : String(historyError))
+    scheduleAutoSave()
+  }
+}
+
 function reloadConfig(): void {
   if (dirty.value) {
-    askConfirm('当前有未保存的修改，重新加载将丢弃这些修改。继续？', () => void load())
+    askConfirm('当前有未保存的修改，重新加载将丢弃这些修改。继续？', () => {
+      cancelAutoSave()
+      void load()
+    })
   } else {
     void load()
   }
 }
 
 onMounted(() => void load())
+onUnmounted(cancelAutoSave)
 </script>
 
 <template>
@@ -462,18 +594,18 @@ onMounted(() => void load())
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="config-actions" role="toolbar" aria-label="配置文件操作">
-          <button
-            class="config-action config-action-primary"
-            type="button"
-            :disabled="saving || !dirty"
-            @click="void save()"
-          >
-            <span class="config-action-icon" aria-hidden="true">💾</span>
-            <span>{{ saving ? '保存中…' : dirty ? '保存配置' : '已保存' }}</span>
-          </button>
           <button class="config-action" type="button" :disabled="loading" @click="reloadConfig">
             <span class="config-action-icon" aria-hidden="true">↻</span>
             <span>重新加载</span>
+          </button>
+          <button
+            class="config-action"
+            type="button"
+            :disabled="historyLoading"
+            @click="void openHistory()"
+          >
+            <span class="config-action-icon" aria-hidden="true">↶</span>
+            <span>历史版本</span>
           </button>
           <button class="config-action" type="button" @click="void importFrom()">
             <span class="config-action-icon" aria-hidden="true">↓</span>
@@ -498,7 +630,8 @@ onMounted(() => void load())
         </div>
       </div>
       <div class="toolbar-right">
-        <span v-if="dirty" class="meta-chip meta-amber">有未保存的修改</span>
+        <span v-if="saving" class="meta-chip meta-green">正在保存…</span>
+        <span v-else-if="dirty && !error" class="meta-chip meta-amber">等待自动保存</span>
         <span class="meta-chip mono config-path" :title="configPath">{{ configPath }}</span>
       </div>
     </div>
@@ -661,6 +794,33 @@ onMounted(() => void load())
         @close="groupEditor = null"
         @remove="removeGroupFromEditor"
       />
+    </Transition>
+
+    <Transition name="modal">
+      <div v-if="historyOpen" class="modal-mask" @click.self="historyOpen = false">
+        <div class="modal modal-wide">
+          <header class="modal-head">
+            <h2>历史版本</h2>
+            <button class="btn btn-icon" title="关闭" @click="historyOpen = false">✕</button>
+          </header>
+          <p class="modal-hint muted">最近保存的 5 个配置版本，恢复前会自动保留当前版本。</p>
+          <div v-if="historyEntries.length === 0" class="muted history-empty">
+            暂无历史版本
+          </div>
+          <div v-else class="history-list">
+            <div v-for="(entry, index) in historyEntries" :key="entry.id" class="history-row">
+              <div>
+                <strong>版本 {{ historyEntries.length - index }}</strong>
+                <span class="muted history-time">{{ formatHistoryDate(entry.savedAt) }}</span>
+              </div>
+              <button class="btn btn-sm" @click="askRestoreHistory(entry)">
+                <span aria-hidden="true">↶</span>
+                恢复
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </Transition>
 
     <Transition name="modal">

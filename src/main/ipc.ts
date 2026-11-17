@@ -15,7 +15,8 @@ import { promises as fs } from 'fs'
 import { existsSync } from 'fs'
 import * as path from 'path'
 import type { TunnelManager } from '../core/manager'
-import { defaultConfig } from '../core/config'
+import type { ConfigData } from '../core/types'
+import { defaultConfig, parseConfig } from '../core/config'
 import { createTunnelManager, FileConfigStore } from '../platforms/node'
 import { CHANNELS, type IpcArgs, type IpcChannel, type IpcResult } from '../shared/contract'
 import { assertConfigPayload, assertTarget, assertUiPrefsPatch } from './ipc-guard'
@@ -23,6 +24,11 @@ import { loadSettings, patchSettings, resolveUiPrefs } from './settings'
 import { importConfigFromFile } from './config-import'
 import { ElectronSecretStore } from './secret-store'
 import type { StatusBroadcaster } from './status'
+import {
+  listConfigHistory,
+  readConfigHistory,
+  recordConfigHistory
+} from './config-history'
 
 /**
  * `ipcMain.handle` with the contract's argument and result types attached: the
@@ -95,6 +101,25 @@ export async function registerIpc(
   /** Mutations push the new projection instead of waiting for the next tick. */
   const announce = (): void => void status.push(true)
 
+  async function recordHistory(before: string, after: string): Promise<void> {
+    try {
+      const configPath = manager.getConfigPath()
+      await recordConfigHistory(configPath, before)
+      await recordConfigHistory(configPath, after)
+    } catch (error) {
+      // History is a convenience layer; a read-only sidecar must not make a
+      // successful config save fail.
+      console.warn('unable to write config history', error)
+    }
+  }
+
+  async function saveConfigWithHistory(cfg: ConfigData): Promise<ConfigData> {
+    const before = await manager.historyConfig()
+    const saved = await manager.saveConfig(cfg)
+    await recordHistory(before, await manager.historyConfig())
+    return saved
+  }
+
   // The default config location is always switchable.
   authorizeConfigPath(manager.getConfigPath())
 
@@ -135,7 +160,7 @@ export async function registerIpc(
 
   handle(CHANNELS.configGet, () => manager.getConfig())
   handle(CHANNELS.configSave, async (cfg) => {
-    const next = await manager.saveConfig(assertConfigPayload(cfg))
+    const next = await saveConfigWithHistory(assertConfigPayload(cfg))
     announce()
     return next
   })
@@ -193,9 +218,17 @@ export async function registerIpc(
   handle(CHANNELS.configReset, async () => {
     // Re-write the default template and reload it.
     const cfg = defaultConfig()
-    await manager.saveConfig(cfg)
+    await saveConfigWithHistory(cfg)
     announce()
     return cfg
+  })
+  handle(CHANNELS.configHistory, () => listConfigHistory(manager.getConfigPath()))
+  handle(CHANNELS.configHistoryRestore, async (id) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('invalid history id')
+    const text = await readConfigHistory(manager.getConfigPath(), id)
+    const restored = await saveConfigWithHistory(parseConfig(text))
+    announce()
+    return restored
   })
 
   handle(CHANNELS.appInfo, async () => {
